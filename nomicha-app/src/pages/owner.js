@@ -29,8 +29,18 @@ async function draw(root) {
     <div class="owner-tabs">${tabs.map(t => `<button data-otab="${t[0]}" aria-pressed="${S.tab === t[0]}">${t[1]}</button>`).join('')}</div>
     <div id="ownBody"><div class="boot">กำลังโหลด…</div></div>
   </div>`;
-  root.querySelectorAll('[data-otab]').forEach(btn => btn.addEventListener('click', () => { S.tab = btn.dataset.otab; loadTab(); }));
+  root.querySelectorAll('[data-otab]').forEach(btn => btn.addEventListener('click', () => {
+    selectOwnerTab(btn.dataset.otab);
+  }));
   await loadTab();
+}
+
+function selectOwnerTab(tab) {
+  S.tab = tab;
+  document.querySelectorAll('[data-otab]').forEach(btn => {
+    btn.setAttribute('aria-pressed', String(btn.dataset.otab === tab));
+  });
+  return loadTab();
 }
 
 async function loadTab() {
@@ -93,11 +103,13 @@ async function renderToday(body) {
     ${flags.length ? `<div class="note" style="margin-bottom:16px"><b>ต้องตรวจ</b> — ${flags.map(f => esc(f.b.name) + ' ' + (f.cc.variance < 0 ? 'ขาด ' : 'เกิน ') + baht(Math.abs(f.cc.variance))).join(' · ')}</div>` : ''}
     <div class="bcards">${cards}</div>
     <p class="foot">พนักงานไม่เห็นตัวเลขผลต่างนี้ — เห็นเฉพาะยอดแก้วเมื่อวานกับแก้วสะสมของตัวเอง</p>`;
-  const g = $('#goRecountBtn'); if (g) g.addEventListener('click', () => { S.tab = 'day'; S.viewBranch = g.dataset.b; loadTab(); });
+  const g = $('#goRecountBtn'); if (g) g.addEventListener('click', () => {
+    S.viewBranch = g.dataset.b;
+    selectOwnerTab('day');
+  });
   body.querySelectorAll('[data-gob]').forEach(card => card.addEventListener('click', () => {
-    S.tab = 'day'; S.viewBranch = card.dataset.gob;
-    document.querySelectorAll('[data-otab]').forEach(b2 => b2.setAttribute('aria-pressed', String(b2.dataset.otab === 'day')));
-    loadTab();
+    S.viewBranch = card.dataset.gob;
+    selectOwnerTab('day');
   }));
 }
 
@@ -957,11 +969,14 @@ async function renderSet(body) {
         ตรวจให้ตรงกับหนังสือรับรองบริษัทจริงก่อนใช้พิมพ์ยื่นสรรพากร</p>
       ${(companies || []).map(c => `<div style="border-top:1px solid var(--line-2);padding-top:10px;margin-top:10px">
         <div class="eyebrow" style="margin-bottom:6px">${c.id === 'warehouse' ? 'คลังกลาง (ผู้ขาย/ผู้ส่งของ)' : 'สาขา (ผู้ซื้อ/ผู้รับของ)'}</div>
-        <div class="row" style="gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
-          <span class="sub" style="width:112px;flex:0 0 112px">ชื่อบริษัท</span>
-          <input value="${esc(c.name || '')}" data-coname="${c.id}" style="flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line-2);border-radius:7px;font-size:14px">
+        <div class="company-field">
+          <label class="sub">ชื่อบริษัท</label>
+          <input value="${esc(c.name || '')}" data-coname="${c.id}">
         </div>
-        <div class="field"><label>ที่อยู่จดทะเบียน</label><input value="${esc(c.address || '')}" data-coaddr="${c.id}" placeholder="เลขที่ / หมู่ / ตำบล / อำเภอ / จังหวัด / รหัสไปรษณีย์"></div>
+        <div class="company-field">
+          <label class="sub">ที่อยู่จดทะเบียน</label>
+          <input value="${esc(c.address || '')}" data-coaddr="${c.id}" placeholder="เลขที่ / หมู่ / ตำบล / อำเภอ / จังหวัด / รหัสไปรษณีย์">
+        </div>
         <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
           <span class="sub">เลขผู้เสียภาษี 13 หลัก</span><input value="${esc(c.tax_id || '')}" data-cotax="${c.id}" style="width:160px" inputmode="numeric">
           <label class="sub" style="display:flex;align-items:center;gap:4px">
