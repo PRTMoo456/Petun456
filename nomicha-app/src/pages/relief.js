@@ -37,7 +37,13 @@ async function draw(root) {
     <div class="owner-tabs" style="margin-bottom:16px">${tabs.map(t =>
       `<button data-rtab="${t[0]}" aria-pressed="${S.tab === t[0]}">${t[1]}</button>`).join('')}</div>
     <div id="reliefBody"><div class="boot">กำลังโหลด…</div></div>`;
-  box.querySelectorAll('[data-rtab]').forEach(btn => btn.addEventListener('click', () => { S.tab = btn.dataset.rtab; draw($('#roleRoot')); }));
+  // เปลี่ยนเฉพาะเนื้อหาแท็บ: ไม่ต้องวาดหัวหน้า/ปุ่มนำทางทั้งหน้าใหม่ทุกครั้ง
+  box.querySelectorAll('[data-rtab]').forEach(btn => btn.addEventListener('click', () => {
+    if (S.tab === btn.dataset.rtab) return;
+    S.tab = btn.dataset.rtab;
+    box.querySelectorAll('[data-rtab]').forEach(tab => tab.setAttribute('aria-pressed', String(tab === btn)));
+    loadTab();
+  }));
   await loadTab();
 }
 

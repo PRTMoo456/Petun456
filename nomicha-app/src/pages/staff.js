@@ -26,8 +26,8 @@ export async function renderStaffApp(root, me) {
   ME = me;
   TODAY = todayISO();
   const [{ data: branch, error }, { data: items }] = await Promise.all([
-    supabase.from('branches').select('*').eq('id', me.branch_id).single(),
-    supabase.from('stock_items').select('*').eq('active', true).order('display_order'),
+    supabase.from('branches').select('id,name,float_cash,days_off_quota,holiday_work_days,gps_lat,gps_lng,gps_radius,work_start,work_end,late_grace_min,company_id,active').eq('id', me.branch_id).single(),
+    supabase.from('stock_items').select('id,name,unit,min_qty,per_case,branch_price,category_id,display_order,active').eq('active', true).order('display_order'),
   ]);
   if (error || !branch) { root.innerHTML = `<div class="wrap"><p class="sub">หาสาขาของคุณไม่เจอ — แจ้งเจ้าของ</p></div>`; return; }
   BRANCH = branch;
@@ -44,7 +44,7 @@ async function draw(root) {
   const [
     { data: clockRow }, { data: prevRows }, { data: todayRow },
     { data: dayOffsAll }, { data: reliefOffs }, { data: rounds },
-    { data: deliveries }, { data: remits }, { data: offsetRow }, { data: advances }, { data: allBranches },
+    { data: deliveries }, { data: allBranches },
   ] = await Promise.all([
     supabase.from('clock_records').select('*').eq('branch_id', BRANCH.id).eq('clock_date', TODAY).maybeSingle(),
     supabase.from('daily_records').select('*').eq('branch_id', BRANCH.id).lt('record_date', TODAY).order('record_date', { ascending: false }).limit(1),
@@ -53,18 +53,14 @@ async function draw(root) {
     supabase.from('relief_day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
     supabase.from('delivery_rounds').select('*'),
     supabase.from('deliveries').select('*').eq('branch_id', BRANCH.id).eq('delivery_date', TODAY),
-    supabase.from('cash_remittances').select('*').eq('branch_id', BRANCH.id).order('remit_date', { ascending: false }),
-    supabase.from('remit_loan_offsets').select('*').eq('branch_id', BRANCH.id).maybeSingle(),
-    // เบิก/กู้คิดรวมเป็นก้อนของสาขา (1 สาขา 1 บัญชี) — ไม่แยกตามชื่อคน ให้ตรงกับหน้าเจ้าของ
-    supabase.from('advances').select('*').eq('branch_id', BRANCH.id).order('request_date', { ascending: false }),
     supabase.from('branches').select('id,name'),
   ]);
   const ctx = {
     clock: clockRow || null, prev: (prevRows && prevRows[0]) || null, today: todayRow || null,
     dayOffsAll: dayOffsAll || [], reliefOffs: (reliefOffs || []).map(x => x.off_date),
-    rounds: rounds || [], deliveries: deliveries || [], remits: remits || [],
+    rounds: rounds || [], deliveries: deliveries || [],
     branchNames: (allBranches || []).reduce((a, b) => (a[b.id] = b.name, a), {}),
-    remitOffset: offsetRow ? N(offsetRow.amount) : 0, advances: advances || [], future,
+    future,
   };
 
   box.innerHTML = shell(ctx);
@@ -223,14 +219,31 @@ function receivedCardHTML(round, dlv) {
 async function loadRemitCard(ctx) {
   const el = $('#remitCard'); if (!el) return;
   const cfg = getSettings();
-  const lastRemitDate = ctx.remits.length ? ctx.remits[0].remit_date : null;
-  // ดึงตั้งแต่วันที่ส่งเงินครั้งล่าสุดเป็นต้นมา (เดิมจำกัดแค่ 40 วันล่าสุด ถ้าค้างส่งนานกว่านั้นยอดจะขาดหายเงียบ ๆ)
-  const { data: recentRecords } = await supabase.from('daily_records').select('record_date,cash,float_cash,sent')
-    .eq('branch_id', BRANCH.id).eq('sent', true).gte('record_date', lastRemitDate || '2000-01-01')
-    .order('record_date', { ascending: false });
-  const p = calc.cashPending(recentRecords || [], lastRemitDate, ctx.remitOffset);
+  // การ์ดนี้อยู่ใต้ส่วนหลักของหน้า จึงโหลดหลังหน้าพร้อมใช้งานแล้ว
+  // และเก็บผลไว้กับ context เดียวกันเพื่อไม่ยิงซ้ำเมื่อเปิด/ปิดฟอร์มกู้เงิน
+  if (!ctx.advancesPromise) {
+    ctx.advancesPromise = supabase.from('advances').select('*').eq('branch_id', BRANCH.id)
+      .order('request_date', { ascending: false }).then(({ data }) => data || []);
+  }
+  if (!ctx.remitDataPromise) {
+    ctx.remitDataPromise = Promise.all([
+      supabase.from('cash_remittances').select('remit_date,amount,method').eq('branch_id', BRANCH.id).order('remit_date', { ascending: false }),
+      supabase.from('remit_loan_offsets').select('amount').eq('branch_id', BRANCH.id).maybeSingle(),
+      ctx.advancesPromise,
+    ]).then(async ([{ data: remits }, { data: offsetRow }, { data: advances }]) => {
+      const lastRemitDate = remits?.[0]?.remit_date || '2000-01-01';
+      const { data: recentRecords } = await supabase.from('daily_records').select('record_date,cash,float_cash,sent')
+        .eq('branch_id', BRANCH.id).eq('sent', true).gte('record_date', lastRemitDate)
+        .order('record_date', { ascending: false });
+      return { remits: remits || [], remitOffset: offsetRow ? N(offsetRow.amount) : 0, advances: advances || [], recentRecords: recentRecords || [] };
+    });
+  }
+  const { remits, remitOffset, advances, recentRecords } = await ctx.remitDataPromise;
+  ctx.advances = advances;
+  ctx.remitOffset = remitOffset;
+  const p = calc.cashPending(recentRecords, remits[0]?.remit_date || null, remitOffset);
   const round = isRoundOn(ctx.rounds, TODAY);
-  const myAdv = ctx.advances.filter(a => !calc.isSettled(a, TODAY));
+  const myAdv = advances.filter(a => !calc.isSettled(a, TODAY));
   const advLines = myAdv.map(a => `<div class="between"><span>${a.type === 'advance' ? 'คำขอเบิกเงิน' : 'เงินกู้'} ${baht(a.total)} บาท</span><span class="sub">หักเงินเดือนงวดถัดไป</span></div>`).join('');
   el.innerHTML = `
     <div class="between" style="margin-bottom:4px">
@@ -362,11 +375,16 @@ async function loadMeTab(ctx) {
   const cfg = getSettings();
   const dates = monthDates(TODAY);
   const monthStart = dates[0];
-  const [{ data: records }, { data: clocks }, { data: reliefName }] = await Promise.all([
+  // ประวัติเงินเบิกไม่ใช่ข้อมูลของหน้าแรก จึงอ่านเมื่อเปิดแท็บนี้เท่านั้น
+  const advancesPromise = ctx.advancesPromise || (ctx.advancesPromise = supabase.from('advances').select('*')
+    .eq('branch_id', BRANCH.id).order('request_date', { ascending: false }).then(({ data }) => data || []));
+  const [{ data: records }, { data: clocks }, { data: reliefName }, advances] = await Promise.all([
     supabase.from('daily_records').select('*').eq('branch_id', BRANCH.id).gte('record_date', monthStart).lte('record_date', dates[dates.length - 1]),
     supabase.from('clock_records').select('*').eq('branch_id', BRANCH.id).gte('clock_date', monthStart).lte('clock_date', dates[dates.length - 1]),
     supabase.rpc('relief_name'),   // กันวันที่หัวหน้ามาทำแทนออกจากยอดของสาขา (ดู calc.payrollFor)
+    advancesPromise,
   ]);
+  ctx.advances = advances;
   const clocksByDate = {}; (clocks || []).forEach(c => { clocksByDate[c.clock_date] = c; });
   const pr = calc.payrollFor({
     branch: { relief_name: reliefName || '', base_salary: N(ME.base_salary), days_off_quota: BRANCH.days_off_quota, holiday_work_days: BRANCH.holiday_work_days || 0 },

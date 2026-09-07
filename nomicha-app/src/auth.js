@@ -18,7 +18,9 @@ export async function getSession() {
 export async function getMyEmployee() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const { data, error } = await supabase.from('employees').select('*').eq('id', user.id).maybeSingle();
+  const { data, error } = await supabase.from('employees')
+    .select('id,name,first_name,last_name,role,branch_id,employer_company_id,base_salary,days_off_quota,delivery_pay,active')
+    .eq('id', user.id).maybeSingle();
   if (error) { console.error(error); return null; }
   if (!data) {
     // มีบัญชี auth แต่ยังไม่มีแถวใน employees — เจ้าของยังตั้งค่าไม่ครบ (ดู docs/DEPLOY.md ขั้นที่ 2.4)
