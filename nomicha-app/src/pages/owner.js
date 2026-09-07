@@ -953,15 +953,34 @@ async function renderSet(body) {
   }).join('');
 
   const settingsByKey = {}; (settingsRows || []).forEach(s => { settingsByKey[s.key] = s.value; });
-  const genericKeys = [['grab_commission_pct', 'ค่าคอมแกร๊บ (สัดส่วน เช่น 0.321)'], ['cost_discount_pct', 'ส่วนลดต้นทุนจากราคาส่งสาขา (สัดส่วน)'],
+  const genericKeys = [['grab_commission_pct', 'ค่าคอมแกร๊บ (สัดส่วน เช่น 0.321)'],
     ['advance_cap', 'วงเงินเบิกรอบวันที่ 20 (บาท)'], ['loan_cap', 'วงเงินเงินกู้ (บาท)'], ['loan_interest_pct', 'ดอกเบี้ยเงินกู้ (สัดส่วน)'],
-    ['pay_rules', 'กติกาจ่าย/หัก — ค่าแก้ว/บาทต่อนาทีสาย/ปิดไว/ลืมลงเวลา/หยุดเกินโควตา'],
-    ['diligence_rules', 'เบี้ยขยัน — step/cap/นาทีที่ผ่อนผันรวมต่อเดือน'],
-    ['holiday_pay_scale', 'ค่าทำงานวันหยุด (ครั้งที่ 1-4)'],
-    ['cup_price', 'ราคาแก้ว (เย็น/ปั่น)'], ['cups_per_row', 'จำนวนแก้วต่อแถว (เย็น/ปั่น)'],
     ['overuse_threshold_units', 'เกณฑ์ผลต่างรับของที่ถือว่าผิดปกติ (หน่วย)']];
   const genericRows = genericKeys.map(([k, label]) => `<div class="setrow"><span>${label}</span>
       <input value="${JSON.stringify(settingsByKey[k] ?? '')}" data-settingkey="${k}" style="width:110px"></div>`).join('');
+
+  const structuredValues = {
+    pay_rules: { cupPay: 1, latePerMin: 1, earlyPerMin: 1, noClock: 40, excessDayOff: 330, ...(settingsByKey.pay_rules || {}) },
+    diligence_rules: { step: 500, cap: 1500, lateAllowance: 250, ...(settingsByKey.diligence_rules || {}) },
+    holiday_pay_scale: Array.isArray(settingsByKey.holiday_pay_scale) ? [...settingsByKey.holiday_pay_scale] : [400, 450, 500, 550],
+    cup_price: { yen: 25, pan: 35, ...(settingsByKey.cup_price || {}) },
+    cups_per_row: { yen: 50, pan: 25, ...(settingsByKey.cups_per_row || {}) },
+  };
+  const structuredGroups = [
+    ['pay_rules', 'กติกาจ่าย/หัก', [['cupPay', 'ค่าแรงต่อแก้ว (บาท)'], ['latePerMin', 'หักเมื่อมาสาย (บาท/นาที)'],
+      ['earlyPerMin', 'หักเมื่อปิดร้านก่อนเวลา (บาท/นาที)'], ['noClock', 'หักเมื่อลืมลงเวลา (บาท/ครั้ง)'],
+      ['excessDayOff', 'หักวันหยุดเกินโควตา (บาท/วัน)']]],
+    ['diligence_rules', 'เบี้ยขยัน', [['step', 'เพิ่มครั้งละ (บาท)'], ['cap', 'สูงสุด (บาท)'], ['lateAllowance', 'ผ่อนผันสายรวม (นาที/เดือน)']]],
+    ['holiday_pay_scale', 'ค่าทำงานวันหยุด', [['0', 'ครั้งที่ 1'], ['1', 'ครั้งที่ 2'], ['2', 'ครั้งที่ 3'], ['3', 'ครั้งที่ 4']]],
+    ['cup_price', 'ราคาขายต่อแก้ว', [['yen', 'แก้วเย็น (บาท)'], ['pan', 'แก้วปั่น (บาท)']]],
+    ['cups_per_row', 'จำนวนแก้วต่อแถว', [['yen', 'แก้วเย็น'], ['pan', 'แก้วปั่น']]],
+  ];
+  const structuredRows = structuredGroups.map(([key, title, fields]) => `<div class="setting-group">
+      <h4>${title}</h4>
+      ${fields.map(([field, label]) => `<div class="setrow"><span>${label}</span>
+        <input value="${structuredValues[key][field]}" data-structuredkey="${key}" data-structuredfield="${field}"
+          data-prev="${structuredValues[key][field]}" inputmode="decimal" style="width:110px"></div>`).join('')}
+    </div>`).join('');
 
   body.innerHTML = `<div class="setgrid">
     <div class="card pad" style="grid-column:1/-1"><h3 style="margin-bottom:4px">ข้อมูลบริษัท (สำหรับเอกสาร)</h3>
@@ -999,9 +1018,8 @@ async function renderSet(body) {
             ${r.branch_ids.includes(b.id) ? 'checked' : ''}>${esc(b.name)}</label>`).join('')}</span></div>`).join('')}
       <p class="foot">ติ๊กสาขาที่ต้องส่งของในรอบนั้น · <b>วันส่งของห้ามใครหยุด</b> ระบบกันไว้ให้ตั้งแต่ตอนจองวันหยุด — เปลี่ยนวันแล้วมีผลกับการจองครั้งถัดไป
         (วันหยุดที่จองไว้แล้วก่อนหน้าไม่ถูกยกเลิกให้อัตโนมัติ ต้องดูในแท็บตารางงานเองว่าชนกันไหม)</p></div>
-    <div class="card pad"><h3 style="margin-bottom:8px">ค่าคงที่ทางธุรกิจ</h3>${genericRows}
-      <p class="foot">แก้แล้วมีผลตอนโหลดหน้าใหม่ (รีเฟรช/ล็อกอินใหม่) · ช่องที่เป็นวงเล็บปีกกา/วงเล็บเหลี่ยมต้องคงรูปแบบเดิมไว้ เช่น
-        <code>{"cupPay":1,"latePerMin":1,"earlyPerMin":1,"noClock":40,"excessDayOff":330}</code> — พิมพ์ผิดรูปแบบระบบจะไม่บันทึกให้และเตือนทันที</p></div>
+    <div class="card pad"><h3 style="margin-bottom:8px">ค่าคงที่ทางธุรกิจ</h3>${structuredRows}${genericRows}
+      <p class="foot">กรอกเป็นตัวเลขได้เลย · ค่าใหม่มีผลเมื่อรีเฟรชหรือเข้าสู่ระบบครั้งถัดไป</p></div>
   </div>`;
 
   const saveBranch = async (bid, patch, msg) => {
@@ -1068,6 +1086,19 @@ async function renderSet(body) {
   body.querySelectorAll('input[data-settingkey]').forEach(inp => inp.addEventListener('change', async () => {
     let v; try { v = JSON.parse(inp.value); } catch { toast('กรอกค่าไม่ถูกต้อง (ใส่ตัวเลขหรือ true/false เท่านั้น)'); return; }
     await supabase.from('settings').upsert({ key: inp.dataset.settingkey, value: v, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    toast('บันทึกแล้ว — มีผลตอนโหลดหน้าใหม่ (ล็อกอินใหม่/รีเฟรช)');
+  }));
+  body.querySelectorAll('input[data-structuredkey]').forEach(inp => inp.addEventListener('change', async () => {
+    const v = readSetting(inp); if (v === null) return;
+    const key = inp.dataset.structuredkey;
+    const oldValue = structuredValues[key];
+    const nextValue = Array.isArray(oldValue) ? [...oldValue] : { ...oldValue };
+    nextValue[Array.isArray(nextValue) ? +inp.dataset.structuredfield : inp.dataset.structuredfield] = v;
+    const { error } = await supabase.from('settings').upsert(
+      { key, value: nextValue, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    if (error) { inp.value = inp.dataset.prev; toast('บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง'); return; }
+    structuredValues[key] = nextValue;
+    inp.dataset.prev = String(v);
     toast('บันทึกแล้ว — มีผลตอนโหลดหน้าใหม่ (ล็อกอินใหม่/รีเฟรช)');
   }));
 }
