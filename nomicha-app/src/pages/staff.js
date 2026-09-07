@@ -21,6 +21,7 @@ import * as calc from '../calc.js';
 let ME, BRANCH, TODAY, STOCK_ITEMS = [];
 let S = { tab: 'home', draft: null, openDraft: null, errors: {}, advOpen: false, advAmount: '',
   loanRemitOpen: false, loanRemitAmt: '', receivedOpen: true, receivedDraft: null };
+let clockBusy = false;
 
 export async function renderStaffApp(root, me) {
   ME = me;
@@ -563,32 +564,83 @@ function wireEvents(box, ctx) {
   const sendBtn = $('#sendBtn'); if (sendBtn) sendBtn.addEventListener('click', () => doSend(ctx));
 }
 
-// ลงเวลาเข้า-ออก — ต้องอยู่ในรัศมีร้านจริงถึงจะลงได้ (ตรวจ GPS ทุกครั้ง) · ใช้เวลาไทยเสมอ
-// และคิดนาทีสาย/ปิดไวตามเวลาทำงานของสาขาทันทีตอนกด
-async function doClock(kind) {
-  const btn = $(kind === 'in' ? '#clockInBtn' : '#clockOutBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'กำลังตรวจตำแหน่ง…'; }
-  const at = await verifyForClock(BRANCH, toast);
-  if (!at) { await draw($('#roleRoot')); return; }
+// ลงเวลาเข้า-ออก — ตรวจ GPS ทุกครั้ง ป้องกันกดซ้ำ และรองรับ Supabase รุ่นก่อน migration
+function missingDistanceColumn(error) {
+  const message = String((error && error.message) || '');
+  return ['PGRST204', '42703'].includes(error && error.code)
+    && /(?:in|out)_distance_m|schema cache/i.test(message);
+}
 
-  const timeStr = nowHM();
-  if (kind === 'in') {
-    const late = calc.lateMinutes(timeStr, BRANCH.work_start, BRANCH.late_grace_min);
-    const { error } = await supabase.from('clock_records').upsert({
-      branch_id: BRANCH.id, clock_date: TODAY, staff_name: ME.name, time_in: timeStr, late_minutes: late,
-      in_distance_m: at.distance ?? null,
-    }, { onConflict: 'branch_id,clock_date' });
-    if (error) { toast('ลงเวลาไม่สำเร็จ: ' + error.message); return; }
-    toast(late ? `ลงเวลาเข้างานแล้ว ${timeStr} — สาย ${late} นาที` : 'ลงเวลาเข้างานแล้ว ' + timeStr);
-  } else {
-    const early = calc.earlyMinutes(timeStr, BRANCH.work_end);
-    const { error } = await supabase.from('clock_records')
-      .update({ time_out: timeStr, early_minutes: early, out_distance_m: at.distance ?? null })
-      .eq('branch_id', BRANCH.id).eq('clock_date', TODAY);
-    if (error) { toast('ลงเวลาไม่สำเร็จ: ' + error.message); return; }
-    toast(early ? `ลงเวลาออกงานแล้ว ${timeStr} — ปิดก่อนเวลา ${early} นาที` : 'ลงเวลาออกงานแล้ว ' + timeStr);
+function friendlyClockError(error) {
+  const message = String((error && error.message) || '');
+  if ((error && error.code) === '42501' || /row.level security|permission denied/i.test(message)) {
+    return 'บัญชีนี้ไม่มีสิทธิ์บันทึกเวลาของสาขา กรุณาออกจากระบบแล้วเข้าใหม่ หากยังไม่ได้ให้แจ้งเจ้าของ';
   }
-  await draw($('#roleRoot'));
+  if (/failed to fetch|network|load failed/i.test(message)) {
+    return 'เชื่อมต่อฐานข้อมูลไม่ได้ กรุณาเช็คอินเทอร์เน็ตแล้วกดลองใหม่';
+  }
+  return message || 'ฐานข้อมูลไม่ตอบกลับ กรุณาลองใหม่';
+}
+
+async function saveClock(kind, timeStr, minutes, distance) {
+  if (kind === 'in') {
+    const payload = {
+      branch_id: BRANCH.id, clock_date: TODAY, staff_name: ME.name,
+      time_in: timeStr, late_minutes: minutes, in_distance_m: distance,
+    };
+    let result = await supabase.from('clock_records').upsert(payload, { onConflict: 'branch_id,clock_date' });
+    if (result.error && missingDistanceColumn(result.error)) {
+      console.warn('GPS audit column is not installed; saving clock-in without distance');
+      const { in_distance_m, ...compatible } = payload;
+      result = await supabase.from('clock_records').upsert(compatible, { onConflict: 'branch_id,clock_date' });
+    }
+    return result.error || null;
+  }
+
+  const payload = { time_out: timeStr, early_minutes: minutes, out_distance_m: distance };
+  let result = await supabase.from('clock_records').update(payload)
+    .eq('branch_id', BRANCH.id).eq('clock_date', TODAY);
+  if (result.error && missingDistanceColumn(result.error)) {
+    console.warn('GPS audit column is not installed; saving clock-out without distance');
+    const { out_distance_m, ...compatible } = payload;
+    result = await supabase.from('clock_records').update(compatible)
+      .eq('branch_id', BRANCH.id).eq('clock_date', TODAY);
+  }
+  return result.error || null;
+}
+
+async function doClock(kind) {
+  if (clockBusy) return;
+  clockBusy = true;
+  const btn = $(kind === 'in' ? '#clockInBtn' : '#clockOutBtn');
+  const originalText = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'กำลังตรวจตำแหน่ง… อาจใช้เวลาสักครู่'; }
+
+  try {
+    const at = await verifyForClock(BRANCH, toast);
+    if (!at) return;
+    if (btn) btn.textContent = 'กำลังบันทึกเวลา…';
+
+    const timeStr = nowHM();
+    const minutes = kind === 'in'
+      ? calc.lateMinutes(timeStr, BRANCH.work_start, BRANCH.late_grace_min)
+      : calc.earlyMinutes(timeStr, BRANCH.work_end);
+    const error = await saveClock(kind, timeStr, minutes, at.distance ?? null);
+    if (error) { toast('ลงเวลาไม่สำเร็จ: ' + friendlyClockError(error)); return; }
+
+    if (kind === 'in') {
+      toast(minutes ? `ลงเวลาเข้างานแล้ว ${timeStr} — สาย ${minutes} นาที` : 'ลงเวลาเข้างานแล้ว ' + timeStr);
+    } else {
+      toast(minutes ? `ลงเวลาออกงานแล้ว ${timeStr} — ปิดก่อนเวลา ${minutes} นาที` : 'ลงเวลาออกงานแล้ว ' + timeStr);
+    }
+    await draw($('#roleRoot'));
+  } catch (error) {
+    console.error('Clock operation failed', error);
+    toast('ลงเวลาไม่สำเร็จ: ' + friendlyClockError(error));
+  } finally {
+    clockBusy = false;
+    if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = originalText; }
+  }
 }
 
 async function doOpenCount(ctx) {

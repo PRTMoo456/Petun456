@@ -543,9 +543,29 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('ไม่อนุญาตตำแหน่ง ลงเวลาไม่ได้', denied.ok === false && denied.reason === 'denied', `ได้ reason=${denied.reason}`);
   check('บอกวิธีแก้', /อนุญาต/.test(denied.message), `ข้อความ: ${denied.message}`);
 
+  // GPS มือถือในอาคารอาจคลาดเล็กน้อย — เผื่อตาม accuracy แต่ไม่เกิน 75 เมตร
+  setGeo(ok => ok({ coords: { latitude: lnd.gps_lat + 0.0013, longitude: lnd.gps_lng, accuracy: 60 } }));
+  const nearWithDrift = await geo.checkAtBranch({ ...lnd, gps_radius: 100 });
+  check('อยู่หน้าร้านแต่ GPS คลาดเล็กน้อยยังลงได้', nearWithDrift.ok === true,
+    `ระยะ ${nearWithDrift.distance} ม. accuracy ${nearWithDrift.accuracy} ม.`);
+
+  // โหมดแม่นยำสูงล้ม ต้องลองโหมดสำรองแทนการจบด้วย timeout ทันที
+  let attempts = 0;
+  setGeo((ok, err) => {
+    attempts += 1;
+    if (attempts === 1) err({ code: 2 });
+    else ok({ coords: { latitude: lnd.gps_lat, longitude: lnd.gps_lng, accuracy: 25 } });
+  });
+  const fallback = await geo.getPosition({ timeout: 20, fallbackTimeout: 20 });
+  check('GPS โหมดแรกพลาดแล้วลองโหมดสำรอง', !fallback.error && attempts === 2,
+    `attempts=${attempts} error=${fallback.error || ''}`);
+
   // สาขายังไม่ได้ตั้งพิกัด → ปล่อยผ่าน แต่เตือนให้ไปตั้งค่า (ไม่งั้นทั้งสาขาลงเวลาไม่ได้เลย)
   const noGps = await geo.checkAtBranch({ ...lnd, gps_lat: null, gps_lng: null });
   check('สาขายังไม่ตั้งพิกัด ไม่ล็อกคนออก', noGps.ok === true && noGps.reason === 'no-branch-gps', `ได้ ok=${noGps.ok}`);
+  const invalidGps = await geo.checkAtBranch({ ...lnd, gps_lat: 999 });
+  check('พิกัดสาขาผิดไม่ล็อกพนักงานทั้งสาขา', invalidGps.ok === true && invalidGps.reason === 'no-branch-gps',
+    `ได้ ok=${invalidGps.ok} reason=${invalidGps.reason}`);
   console.log('✓ GPS — ลงเวลาได้เฉพาะในรัศมีร้าน · ไกลเกิน/ไม่เปิดตำแหน่ง = ลงไม่ได้ พร้อมบอกเหตุผล');
 }
 

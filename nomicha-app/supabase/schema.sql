@@ -361,13 +361,18 @@ insert into settings (key, value) values
 -- Row Level Security — 3 บทบาท: staff (เห็นเฉพาะสาขาตัวเอง) / relief (หัวหน้า) / owner (เห็นทุกอย่าง)
 -- ==============================================================
 create or replace function auth_role() returns user_role
-language sql stable as $$
-  select role from employees where id = auth.uid();
+language sql stable security definer set search_path = public, pg_temp as $$
+  select role from public.employees where id = auth.uid();
 $$;
 create or replace function auth_branch() returns text
-language sql stable as $$
-  select branch_id from employees where id = auth.uid();
+language sql stable security definer set search_path = public, pg_temp as $$
+  select branch_id from public.employees where id = auth.uid();
 $$;
+-- ป้องกัน RLS policy query employees แล้วย้อนกลับเข้า policy เดิม
+revoke all on function auth_role() from public;
+revoke all on function auth_branch() from public;
+grant execute on function auth_role() to authenticated;
+grant execute on function auth_branch() to authenticated;
 /* ชื่อหัวหน้า — พนักงานสาขาจำเป็นต้องรู้ เพื่อไม่ให้วันที่หัวหน้ามาทำแทนถูกนับเป็นวันทำงาน/ค่าแก้วของสาขา
    ใช้ security definer เพื่อเปิดเฉพาะ "ชื่อ" ตัวเดียว ไม่ได้เปิดทั้งแถว (เงินเดือน/เงินส่งของของหัวหน้ายังปิดอยู่)
    ชื่อนี้พนักงานเห็นอยู่แล้วบนหน้าจอ (ปฏิทินวันหยุด/ข้อความรับช่วงต่อ) จึงไม่ใช่ข้อมูลใหม่ */
