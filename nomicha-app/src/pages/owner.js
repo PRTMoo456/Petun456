@@ -1010,14 +1010,12 @@ async function renderSet(body) {
       <p class="foot">"ราคาส่งสาขา" เป็นราคาเดียวกันทุกสาขา แก้ตัวเดียวมีผลกับทุกสาขาพร้อมกัน · ตัวเลข "ใช้จริง 7 วันล่าสุด" เอาไว้ดูประกอบตอนตั้งระดับที่ต้องมีต่อรอบ ไม่ให้ตั้งมั่วจนสั่งของเกิน/ขาด</p></div>
     <div class="card pad" style="grid-column:1/-1"><h3 style="margin-bottom:8px">รอบส่งของ</h3>
       ${ROUNDS.map(r => `<div class="setrow" style="align-items:flex-start;flex-wrap:wrap;gap:8px">
-        <span class="row" style="gap:6px"><input value="${esc(r.name)}" data-roundname="${r.id}" style="width:120px">
-          <select class="ctl" data-rounddow="${r.id}" style="width:110px">${DAYS.map((dn, i) =>
-            `<option value="${i}" ${i === r.day_of_week ? 'selected' : ''}>วัน${dn}</option>`).join('')}</select></span>
+        <span class="row" style="gap:8px"><input value="${esc(r.name)}" data-roundname="${r.id}" style="width:120px">
+          <span class="pill ok">วัน${DAYS[r.day_of_week]}</span></span>
         <span class="row" style="flex-wrap:wrap;gap:10px;justify-content:flex-end">${BRANCHES.map(b =>
           `<label class="sub" style="display:flex;align-items:center;gap:4px"><input type="checkbox" data-roundbr="${r.id}" value="${b.id}"
             ${r.branch_ids.includes(b.id) ? 'checked' : ''}>${esc(b.name)}</label>`).join('')}</span></div>`).join('')}
-      <p class="foot">ติ๊กสาขาที่ต้องส่งของในรอบนั้น · <b>วันส่งของห้ามใครหยุด</b> ระบบกันไว้ให้ตั้งแต่ตอนจองวันหยุด — เปลี่ยนวันแล้วมีผลกับการจองครั้งถัดไป
-        (วันหยุดที่จองไว้แล้วก่อนหน้าไม่ถูกยกเลิกให้อัตโนมัติ ต้องดูในแท็บตารางงานเองว่าชนกันไหม)</p></div>
+      <p class="foot">รอบส่งของกำหนดตายตัวเป็นวันจันทร์และวันศุกร์ · ติ๊กเฉพาะสาขาที่อยู่ในแต่ละรอบ · <b>วันส่งของห้ามใครหยุด</b> ระบบกันไว้ให้ตั้งแต่ตอนจองวันหยุด</p></div>
     <div class="card pad"><h3 style="margin-bottom:8px">ค่าคงที่ทางธุรกิจ</h3>${structuredRows}${genericRows}
       <p class="foot">กรอกเป็นตัวเลขได้เลย · ค่าใหม่มีผลเมื่อรีเฟรชหรือเข้าสู่ระบบครั้งถัดไป</p></div>
   </div>`;
@@ -1065,8 +1063,6 @@ async function renderSet(body) {
   };
   body.querySelectorAll('input[data-roundname]').forEach(inp => inp.addEventListener('change', () =>
     saveRound(inp.dataset.roundname, { name: inp.value.trim() || 'รอบส่งของ' }, 'บันทึกชื่อรอบแล้ว')));
-  body.querySelectorAll('select[data-rounddow]').forEach(sel => sel.addEventListener('change', () =>
-    saveRound(sel.dataset.rounddow, { day_of_week: +sel.value }, 'บันทึกวันส่งของแล้ว — มีผลกับการจองวันหยุดครั้งถัดไป')));
   body.querySelectorAll('input[data-roundbr]').forEach(chk => chk.addEventListener('change', () => {
     const rid = chk.dataset.roundbr;
     const ids = [...body.querySelectorAll(`input[data-roundbr="${rid}"]`)].filter(x => x.checked).map(x => x.value);

@@ -9,6 +9,11 @@ const sortBranches = branches => branches.sort((a, b) => {
   const ai = BRANCH_ORDER.indexOf(a.id), bi = BRANCH_ORDER.indexOf(b.id);
   return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
 });
+const sortRounds = rounds => rounds.sort((a, b) => {
+  // เรียงสัปดาห์โดยเริ่มวันจันทร์ เพื่อให้รอบจันทร์อยู่ก่อนรอบศุกร์เสมอ
+  const weekOrder = day => (day + 6) % 7;
+  return weekOrder(a.day_of_week) - weekOrder(b.day_of_week) || a.id.localeCompare(b.id);
+});
 
 export async function loadRefs() {
   // ข้อมูลชุดนี้เปลี่ยนเฉพาะเมื่อเจ้าของบันทึกการตั้งค่า จึงใช้ร่วมกันตลอด session
@@ -19,7 +24,7 @@ export async function loadRefs() {
       supabase.from('stock_items').select('id,name,unit,min_qty,per_case,branch_price,category_id,display_order,active').eq('active', true).order('display_order'),
       supabase.from('delivery_rounds').select('id,name,day_of_week,branch_ids'),
     ]).then(([{ data: branches }, { data: items }, { data: rounds }]) =>
-      ({ branches: sortBranches(branches || []), stockItems: items || [], rounds: rounds || [] }))
+      ({ branches: sortBranches(branches || []), stockItems: items || [], rounds: sortRounds(rounds || []) }))
       .catch(error => { refsPromise = undefined; throw error; });
   }
   return refsPromise;
