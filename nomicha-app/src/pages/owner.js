@@ -957,7 +957,10 @@ async function renderSet(body) {
         ตรวจให้ตรงกับหนังสือรับรองบริษัทจริงก่อนใช้พิมพ์ยื่นสรรพากร</p>
       ${(companies || []).map(c => `<div style="border-top:1px solid var(--line-2);padding-top:10px;margin-top:10px">
         <div class="eyebrow" style="margin-bottom:6px">${c.id === 'warehouse' ? 'คลังกลาง (ผู้ขาย/ผู้ส่งของ)' : 'สาขา (ผู้ซื้อ/ผู้รับของ)'}</div>
-        <div class="field"><label>ชื่อบริษัท</label><input value="${esc(c.name || '')}" data-coname="${c.id}"></div>
+        <div class="row" style="gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
+          <span class="sub" style="width:112px;flex:0 0 112px">ชื่อบริษัท</span>
+          <input value="${esc(c.name || '')}" data-coname="${c.id}" style="flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line-2);border-radius:7px;font-size:14px">
+        </div>
         <div class="field"><label>ที่อยู่จดทะเบียน</label><input value="${esc(c.address || '')}" data-coaddr="${c.id}" placeholder="เลขที่ / หมู่ / ตำบล / อำเภอ / จังหวัด / รหัสไปรษณีย์"></div>
         <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
           <span class="sub">เลขผู้เสียภาษี 13 หลัก</span><input value="${esc(c.tax_id || '')}" data-cotax="${c.id}" style="width:160px" inputmode="numeric">

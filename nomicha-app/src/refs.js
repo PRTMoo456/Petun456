@@ -3,6 +3,12 @@
 import { supabase } from './supabaseClient.js';
 
 let refsPromise;
+// ลำดับที่ใช้แสดงในทุกหน้าที่เลือกสาขา (ไม่ผูกกับรหัสสาขาในฐานข้อมูล)
+const BRANCH_ORDER = ['lnd', 'bwa', 'ksk', 'bdt', 'nlb'];
+const sortBranches = branches => branches.sort((a, b) => {
+  const ai = BRANCH_ORDER.indexOf(a.id), bi = BRANCH_ORDER.indexOf(b.id);
+  return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
+});
 
 export async function loadRefs() {
   // ข้อมูลชุดนี้เปลี่ยนเฉพาะเมื่อเจ้าของบันทึกการตั้งค่า จึงใช้ร่วมกันตลอด session
@@ -13,7 +19,7 @@ export async function loadRefs() {
       supabase.from('stock_items').select('id,name,unit,min_qty,per_case,branch_price,category_id,display_order,active').eq('active', true).order('display_order'),
       supabase.from('delivery_rounds').select('id,name,day_of_week,branch_ids'),
     ]).then(([{ data: branches }, { data: items }, { data: rounds }]) =>
-      ({ branches: branches || [], stockItems: items || [], rounds: rounds || [] }))
+      ({ branches: sortBranches(branches || []), stockItems: items || [], rounds: rounds || [] }))
       .catch(error => { refsPromise = undefined; throw error; });
   }
   return refsPromise;
