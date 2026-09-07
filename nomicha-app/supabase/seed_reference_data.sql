@@ -317,52 +317,9 @@ insert into stock_par_levels (item_id, branch_id, par_qty) values (44, 'ksk', 1)
 insert into stock_par_levels (item_id, branch_id, par_qty) values (44, 'bdt', 1);
 
 -- คลังกลาง: เริ่มที่ 0 ทุกรายการตามหลักการระบบจริง (ข้อ 22.3) — เจ้าของนับสต๊อกจริงแล้วค่อย UPDATE/INSERT purchases เอง
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (0, 0, 0, 58.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (1, 0, 0, 79.20);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (2, 0, 0, 31.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (3, 0, 0, 45.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (4, 0, 0, 23.40);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (5, 0, 0, 105.30);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (6, 0, 0, 64.80);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (7, 0, 0, 26.10);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (8, 0, 0, 77.40);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (9, 0, 0, 144.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (10, 0, 0, 144.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (11, 0, 0, 162.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (12, 0, 0, 31.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (13, 0, 0, 38.70);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (14, 0, 0, 32.40);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (15, 0, 0, 35.10);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (16, 0, 0, 18.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (17, 0, 0, 18.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (18, 0, 0, 171.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (19, 0, 0, 67.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (20, 0, 0, 60.30);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (21, 0, 0, 90.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (22, 0, 0, 18.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (23, 0, 0, 45.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (24, 0, 0, 162.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (25, 0, 0, 162.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (26, 0, 0, 162.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (27, 0, 0, 84.60);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (28, 0, 0, 108.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (29, 0, 0, 346.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (30, 0, 0, 142.20);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (31, 0, 0, 127.80);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (32, 0, 0, 76.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (33, 0, 0, 67.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (34, 0, 0, 67.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (35, 0, 0, 67.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (36, 0, 0, 67.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (37, 0, 0, 67.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (38, 0, 0, 127.80);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (39, 0, 0, 127.80);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (40, 0, 0, 171.00);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (41, 0, 0, 5.81);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (42, 0, 0, 127.80);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (43, 0, 0, 121.50);
-insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost) values (44, 0, 0, 9.00);
--- avg_cost ตั้งต้น = ราคาส่งสาขา - 10% (สูตรทางการตามข้อ 21) จะขยับเองเมื่อมีบิลซื้อจริงเข้ามา (ดู purchases + ฟังก์ชันคำนวณฝั่งแอป)
+insert into warehouse_stock (item_id, case_qty, loose_qty, avg_cost)
+select id, 0, 0, 0 from stock_items;
+-- avg_cost เริ่มที่ 0 และเปลี่ยนจากบิลซื้อจริงเท่านั้น
 
 -- พนักงาน 7 คน (staff x5 + หัวหน้า + เจ้าของ) ต้องสร้างผ่าน Supabase Auth ก่อน (Dashboard > Authentication > Add user)
 -- แล้วค่อย insert ตารางนี้โดยใช้ uuid ของแต่ละคนจาก auth.users (ดูขั้นตอนใน docs/DEPLOY.md ข้อ 4)

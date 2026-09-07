@@ -1,7 +1,6 @@
 // สต๊อกคลังกลาง + บิลขายวัตถุดิบนอกสาขา — ใช้ร่วมกันทั้งหน้าหัวหน้าและหน้าเจ้าของ
 // พอร์ตจาก whAvail()/whTakeUnits()/whReturnUnits()/doIssueExternal()/applyExtEdit() ในต้นแบบ nomicha.html
 import { supabase } from './supabaseClient.js';
-import { getSettings } from './settings.js';
 import { N, todayISO } from './util.js';
 
 // ของที่หยิบขายได้จริงของแต่ละรายการ (ลังเต็ม × จำนวนต่อลัง + ชิ้นเศษ)
@@ -16,7 +15,7 @@ export async function whAvailMap(stockItems) {
 }
 
 const defaultRow = it => ({ case_qty: 0, loose_qty: 0, last_checked: null,
-  avg_cost: +(it.branch_price * (1 - getSettings().costDiscountPct)).toFixed(2) });
+  avg_cost: 0 });
 
 // หยิบของออก qty หน่วย — หยิบจากชิ้นเศษก่อน ไม่พอค่อยแกะลังเต็ม (พอร์ตจาก whTakeUnits)
 function takeFrom(row, it, qty) {

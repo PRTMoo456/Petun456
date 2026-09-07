@@ -267,7 +267,7 @@ async function saveWhStock(stockById) {
     const v = S.whDraft[it.id], vl = S.whDraftLoose[it.id];
     if ((v == null || v === '') && (vl == null || vl === '')) return;
     const patch = { item_id: it.id, last_checked: TODAY,
-      avg_cost: stockById[it.id]?.avg_cost ?? +(it.branch_price * (1 - getSettings().costDiscountPct)).toFixed(2) };
+      avg_cost: stockById[it.id]?.avg_cost ?? 0 };
     patch.case_qty = (v != null && v !== '') ? N(v) : (stockById[it.id]?.case_qty ?? 0);
     patch.loose_qty = (vl != null && vl !== '') ? N(vl) : (stockById[it.id]?.loose_qty ?? 0);
     writes.push(supabase.from('warehouse_stock').upsert(patch, { onConflict: 'item_id' }));

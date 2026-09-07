@@ -11,7 +11,6 @@ export async function loadSettings() {
   for (const row of data) s[row.key] = row.value;
   cache = {
     grabCommissionPct: s.grab_commission_pct ?? 0.321,
-    costDiscountPct: s.cost_discount_pct ?? 0.10,
     advanceCap: s.advance_cap ?? 4000,
     loanCap: s.loan_cap ?? 2000,
     loanInterestPct: s.loan_interest_pct ?? 0.10,

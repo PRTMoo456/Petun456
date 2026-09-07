@@ -88,7 +88,7 @@ export function makeDb(TODAY) {
     recount_requests: [{ id: 'rc1', branch_id: 'nlb', request_date: d(-1), prev_record_id: 'r-nlb-2', staff_name: 'อัม', old_yen: 20, old_pan: 10, new_yen: 18, new_pan: 10, value_diff: -50, status: 'pending', requested_at: TODAY }],
     record_edit_history: [],
     settings: [
-      { key: 'grab_commission_pct', value: 0.321 }, { key: 'cost_discount_pct', value: 0.10 },
+      { key: 'grab_commission_pct', value: 0.321 },
       { key: 'advance_cap', value: 4000 }, { key: 'loan_cap', value: 2000 }, { key: 'loan_interest_pct', value: 0.10 },
       { key: 'advance_day', value: 20 }, { key: 'settle_days', value: [5, 20] },
       { key: 'cup_price', value: { yen: 25, pan: 35 } }, { key: 'cups_per_row', value: { yen: 50, pan: 25 } },

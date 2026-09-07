@@ -132,7 +132,7 @@ create table stock_items (
   display_order   int not null default 0,
   active          boolean not null default true
 );
-comment on table stock_items is 'perCase/branch_price เป็นตัวเลขจริงที่เจ้าของกรอกมา ต้นทุน (cost) ไม่ได้เก็บเป็นคอลัมน์ตายตัวที่นี่ — คำนวณจาก branch_price*(1-COST_DISCOUNT_PCT) เป็นค่าตั้งต้น (settings) แล้วขยับตาม warehouse_stock.avg_cost จริงเมื่อมีบิลซื้อเข้ามา (ดู purchases)';
+comment on table stock_items is 'perCase/branch_price เป็นตัวเลขจริงที่เจ้าของกรอกมา ส่วนต้นทุนใช้ warehouse_stock.avg_cost ซึ่งคำนวณจากราคาซื้อจริงใน purchases เท่านั้น';
 
 create table stock_par_levels (       -- ระดับที่ต้องมีต่อรอบ แยกรายสาขา (ข้อมูลจริง REAL_PAR)
   item_id     int not null references stock_items(id),
@@ -339,11 +339,10 @@ create table settings (
   value         jsonb not null,
   updated_at    timestamptz not null default now()
 );
-comment on table settings is 'เก็บค่าคงที่ทางธุรกิจที่เจ้าของแก้ได้เอง เช่น grab_commission_pct, cost_discount_pct, advance_cap, loan_cap, loan_interest_pct, cup_price, diligence_rules, holiday_pay_scale';
+comment on table settings is 'เก็บค่าคงที่ทางธุรกิจที่เจ้าของแก้ได้เอง เช่น grab_commission_pct, advance_cap, loan_cap, loan_interest_pct, cup_price, diligence_rules, holiday_pay_scale';
 
 insert into settings (key, value) values
   ('grab_commission_pct', '0.321'),
-  ('cost_discount_pct',   '0.10'),
   ('advance_cap',         '4000'),
   ('loan_cap',            '2000'),
   ('loan_interest_pct',   '0.10'),

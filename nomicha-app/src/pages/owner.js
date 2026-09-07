@@ -736,7 +736,7 @@ async function renderPL(body) {
   const totGrabComm = rows.reduce((s, x) => s + x.x.grabCommission, 0);
   const totNet = rows.reduce((s, x) => s + x.x.net, 0);
 
-  const avgCostById = {}; STOCK_ITEMS.forEach(it => { const row = (whStock || []).find(s => s.item_id === it.id); avgCostById[it.id] = row?.avg_cost ?? (it.branch_price * (1 - cfg.costDiscountPct)); });
+  const avgCostById = {}; STOCK_ITEMS.forEach(it => { const row = (whStock || []).find(s => s.item_id === it.id); avgCostById[it.id] = row?.avg_cost ?? 0; });
   const allDeliveries = (deliveries || []).map(x => ({ items: x.items, received: x.received }));
   // ยอดขายนอกสาขาที่เข้ากำไรคลังกลาง ต้องนับเฉพาะบิลของเดือนนี้ ให้ตรงกับช่วงเดียวกับการส่งของ/ค่าแรง
   const allExternal = (externalSales || []).filter(s => s.sale_date >= dates[0] && s.sale_date <= dates[dates.length - 1]).map(s => ({ items: s.items }));
