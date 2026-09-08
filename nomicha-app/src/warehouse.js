@@ -4,8 +4,11 @@ import { supabase } from './supabaseClient.js';
 import { N, todayISO } from './util.js';
 
 // ของที่หยิบขายได้จริงของแต่ละรายการ (ลังเต็ม × จำนวนต่อลัง + ชิ้นเศษ)
-export async function whAvailMap(stockItems) {
-  const { data } = await supabase.from('warehouse_stock').select('*');
+export async function whAvailMap(stockItems, stockRows) {
+  const { data, error } = stockRows === undefined
+    ? await supabase.from('warehouse_stock').select('item_id,case_qty,loose_qty')
+    : { data: stockRows };
+  if (error) throw error;
   const m = {};
   (data || []).forEach(s => {
     const it = stockItems.find(x => x.id === s.item_id);

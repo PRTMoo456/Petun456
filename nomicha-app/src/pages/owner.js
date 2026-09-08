@@ -599,8 +599,8 @@ async function loadMonthPayroll() {
 
 async function renderPay(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
-  const { cfg, allRecords, relief, payPeople, prR } = await loadMonthPayroll();
-  const [{ data: allRemits }, { data: headRemits }, { data: allOffsets }, { data: cashRecords }] = await Promise.all([
+  const [{ cfg, allRecords, relief, payPeople, prR }, { data: allRemits }, { data: headRemits }, { data: allOffsets }, { data: cashRecords }] = await Promise.all([
+    loadMonthPayroll(),
     supabase.from('cash_remittances').select('*'),
     supabase.from('head_remittances').select('*'),
     supabase.from('remit_loan_offsets').select('*'),
@@ -705,8 +705,9 @@ async function renderPay(body) {
 /* ============================== กำไร/ขาดทุน ============================== */
 async function renderPL(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
-  const { cfg, dates, clocksByDateAll, employees, payPeople, prR } = await loadMonthPayroll();
-  const [{ data: branchRentRows }, { data: deliveries }, { data: repairs }, { data: purchases }, { data: whStock }, { data: externalSales }] = await Promise.all([
+  const dates = monthDates(TODAY);
+  const [{ cfg, clocksByDateAll, employees, payPeople, prR }, { data: branchRentRows }, { data: deliveries }, { data: repairs }, { data: purchases }, { data: whStock, error: whError }, { data: externalSales }] = await Promise.all([
+    loadMonthPayroll(),
     supabase.from('branch_rent_history').select('*').order('effective_from'),
     supabase.from('deliveries').select('*').gte('delivery_date', dates[0]).lte('delivery_date', dates[dates.length - 1]),
     supabase.from('repairs').select('*').gte('repair_date', dates[0]).lte('repair_date', dates[dates.length - 1]),
@@ -715,7 +716,8 @@ async function renderPL(body) {
     supabase.from('external_sales').select('*').order('sale_date', { ascending: false }),
   ]);
   const stockItemsById = {}; STOCK_ITEMS.forEach(it => { stockItemsById[it.id] = { branch_price: it.branch_price, unit: it.unit, per_case: it.per_case, name: it.name }; });
-  const extAvail = await whAvailMap(STOCK_ITEMS);
+  if (whError) throw whError;
+  const extAvail = await whAvailMap(STOCK_ITEMS, whStock || []);
 
   // ค่าแรงในตารางนี้ = ตัวเดียวกับที่โชว์ในแท็บเงินเดือน (payPeople มาจาก loadMonthPayroll ชุดเดียวกัน)
   const rows = payPeople.map(({ b, records, pr }) => {

@@ -10,6 +10,7 @@
 // เพิ่มในรุ่นนี้: จองวันหยุด (day_offs), ส่งเงินสดให้หัวหน้า + เก็บไว้เป็นเงินกู้แทน (cash_remittances/remit_loan_offsets),
 // เช็ควัตถุดิบนำเข้า (deliveries.received), แท็บ "ของฉัน" (สรุปเงินเดือน + ขอเบิกเงิน/เงินกู้ + ประวัติลงเวลา)
 import { supabase } from '../supabaseClient.js';
+import { loadRefs } from '../refs.js';
 import { getSettings } from '../settings.js';
 import { $, N, numIn, numIn0, baht, esc, toast, todayISO, nowHM, fmtDate, monthKey, monthLabel, monthDates } from '../util.js';
 import { quotaReport, dayChip, OFF_LEGEND, quotaHTML, futureDates } from '../dayoff.js';
@@ -26,13 +27,13 @@ let clockBusy = false;
 export async function renderStaffApp(root, me) {
   ME = me;
   TODAY = todayISO();
-  const [{ data: branch, error }, { data: items }] = await Promise.all([
+  const [{ data: branch, error }, refs] = await Promise.all([
     supabase.from('branches').select('id,name,float_cash,days_off_quota,holiday_work_days,gps_lat,gps_lng,gps_radius,work_start,work_end,late_grace_min,company_id,active').eq('id', me.branch_id).single(),
-    supabase.from('stock_items').select('id,name,unit,min_qty,per_case,branch_price,category_id,display_order,active').eq('active', true).order('display_order'),
+    loadRefs(),
   ]);
   if (error || !branch) { root.innerHTML = `<div class="wrap"><p class="sub">หาสาขาของคุณไม่เจอ — แจ้งเจ้าของ</p></div>`; return; }
   BRANCH = branch;
-  STOCK_ITEMS = items || [];
+  STOCK_ITEMS = refs.stockItems;
   await draw(root);
 }
 
@@ -52,7 +53,7 @@ async function draw(root) {
     supabase.from('daily_records').select('*').eq('branch_id', BRANCH.id).eq('record_date', TODAY).maybeSingle(),
     supabase.from('day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
     supabase.from('relief_day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
-    supabase.from('delivery_rounds').select('*'),
+    loadRefs().then(refs => ({ data: refs.rounds })),
     supabase.from('deliveries').select('*').eq('branch_id', BRANCH.id).eq('delivery_date', TODAY),
     supabase.from('branches').select('id,name'),
   ]);

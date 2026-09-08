@@ -23,8 +23,12 @@ export async function loadRefs() {
       supabase.from('branches').select('id,name,float_cash,days_off_quota,holiday_work_days,gps_lat,gps_lng,gps_radius,work_start,work_end,late_grace_min,company_id,active').eq('active', true).order('id'),
       supabase.from('stock_items').select('id,name,unit,min_qty,per_case,branch_price,category_id,display_order,active').eq('active', true).order('display_order'),
       supabase.from('delivery_rounds').select('id,name,day_of_week,branch_ids'),
-    ]).then(([{ data: branches }, { data: items }, { data: rounds }]) =>
-      ({ branches: sortBranches(branches || []), stockItems: items || [], rounds: sortRounds(rounds || []) }))
+    ]).then(results => {
+      const failed = results.find(result => result.error);
+      if (failed) throw failed.error;
+      const [{ data: branches }, { data: items }, { data: rounds }] = results;
+      return { branches: sortBranches(branches || []), stockItems: items || [], rounds: sortRounds(rounds || []) };
+    })
       .catch(error => { refsPromise = undefined; throw error; });
   }
   return refsPromise;
