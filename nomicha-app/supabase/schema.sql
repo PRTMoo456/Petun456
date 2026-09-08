@@ -113,7 +113,7 @@ create table delivery_rounds (
 );
 
 -- ------------------------------------------------------------
--- 5. วัตถุดิบ (45 รายการ) + ระดับที่ต้องมีต่อรอบรายสาขา
+-- 5. วัตถุดิบ (44 รายการ) + ระดับที่ต้องมีต่อรอบรายสาขา
 -- ------------------------------------------------------------
 create table stock_categories (
   id            int primary key,
@@ -122,7 +122,7 @@ create table stock_categories (
 );
 
 create table stock_items (
-  id              int primary key,          -- คงเลข id เดิม 0-44 ให้ตรงกับต้นแบบ กันสับสนตอนย้ายข้อมูล
+  id              int primary key,          -- คงเลข id เดิมไว้ (0-44 โดยไม่มี 15) กันข้อมูลเก่าเหลื่อม
   name            text not null,
   unit            text not null,            -- แถว/ห่อ/ถุง/ขวด/กระป๋อง/กล่อง
   min_qty         int not null,             -- ขั้นต่ำที่ต้องมี (ใช้เตือนของใกล้หมด)
@@ -187,7 +187,7 @@ create table daily_records (
   grab          numeric not null default 0,   -- ยอดเต็มที่ลูกค้าจ่ายผ่านแกร๊บ (หักค่าคอมตอนคำนวณ ไม่ใช่ตอนกรอก)
   thaichaithai  numeric not null default 0,
   float_cash    numeric not null,             -- เงินทอนตั้งต้นที่ "ใช้จริงวันนั้น" (snapshot ไม่ใช้ค่าปัจจุบันของสาขา)
-  stock_snapshot jsonb not null default '{}', -- {item_id: qty} ยอดคงเหลือปลายวันของวัตถุดิบ 45 รายการ
+  stock_snapshot jsonb not null default '{}', -- {item_id: qty} ยอดคงเหลือปลายวันของวัตถุดิบ
   sent          boolean not null default false,
   closed        boolean not null default false,
   created_by    uuid references employees(id),
@@ -484,6 +484,6 @@ create policy ref_read_par on stock_par_levels for select using (true);
 create policy ref_write_par on stock_par_levels for all using (auth_role() in ('owner')) with check (auth_role()='owner');
 
 -- ==============================================================
--- หมายเหตุสำคัญ: ไฟล์นี้ตั้งโครงตาราง + กติกาความปลอดภัยเท่านั้น ไม่ใส่ข้อมูล 45 รายการวัตถุดิบ/ระดับ par/5 สาขา/7 พนักงานจริง
+-- หมายเหตุสำคัญ: ไฟล์นี้ตั้งโครงตาราง + กติกาความปลอดภัยเท่านั้น ไม่ใส่ข้อมูลวัตถุดิบ/ระดับ par/5 สาขา/7 พนักงานจริง
 -- ให้รันไฟล์ seed_reference_data.sql ต่อ (ข้อมูลจริงที่คัดลอกมาจาก STOCK_ITEMS/REAL_PAR/BRANCHES ในต้นแบบ)
 -- ==============================================================

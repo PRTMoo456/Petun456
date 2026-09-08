@@ -42,7 +42,7 @@ insert into stock_categories (id,name,sort_order) values (5,'น้ำเชื�
 insert into stock_categories (id,name,sort_order) values (6,'โซดา',6);
 insert into stock_categories (id,name,sort_order) values (7,'อื่น ๆ',7);
 
--- วัตถุดิบ 45 รายการ (id ตรงกับต้นแบบเป๊ะ ตั้งแต่ 0-44)
+-- วัตถุดิบ 44 รายการ (คง id เดิมเพื่อไม่ให้ข้อมูลเก่าเหลื่อม โดยไม่มี id 15)
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (0,'แก้วเย็น','แถว',2,20,65,0,0);
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (1,'แก้วปั่น','แถว',1,20,88,0,1);
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (2,'ฝาโดม','แถว',2,20,35,0,2);
@@ -58,7 +58,6 @@ insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (12,'ไข่มุกดำ','ห่อ',3,18,35,3,17);
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (13,'วุ้นบราวชูการ์','ถุง',1,20,43,3,18);
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (14,'วุ้นเยลลี่ผลไม้','ถุง',1,20,36,3,19);
-insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (15,'วุ้นคริสตัล','ถุง',1,20,39,3,20);
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (16,'หลอดเล็ก','ห่อ',2,50,20,0,3);
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (17,'หลอดใหญ่','ห่อ',2,20,20,0,4);
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (18,'ผงโกโก้','ห่อ',1,12,190,4,23);
@@ -89,7 +88,7 @@ insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (43,'นมหมี','กระป๋อง',6,12,135,1,10);
 insert into stock_items (id,name,unit,min_qty,per_case,branch_price,category_id,display_order) values (44,'น้ำยาล้างจาน','ถุง',1,1,10,7,44);
 
--- ระดับที่ต้องมีต่อรอบ แยกรายสาขา (ข้อมูลจริงที่เจ้าของกรอกมา 45 รายการ x 5 สาขา)
+-- ระดับที่ต้องมีต่อรอบ แยกรายสาขา (ข้อมูลจริง 44 รายการ x 5 สาขา)
 insert into stock_par_levels (item_id, branch_id, par_qty) values (0, 'lnd', 8);
 insert into stock_par_levels (item_id, branch_id, par_qty) values (0, 'bwa', 8);
 insert into stock_par_levels (item_id, branch_id, par_qty) values (0, 'nlb', 8);
@@ -165,11 +164,6 @@ insert into stock_par_levels (item_id, branch_id, par_qty) values (14, 'bwa', 1)
 insert into stock_par_levels (item_id, branch_id, par_qty) values (14, 'nlb', 1);
 insert into stock_par_levels (item_id, branch_id, par_qty) values (14, 'ksk', 2);
 insert into stock_par_levels (item_id, branch_id, par_qty) values (14, 'bdt', 1);
-insert into stock_par_levels (item_id, branch_id, par_qty) values (15, 'lnd', 1);
-insert into stock_par_levels (item_id, branch_id, par_qty) values (15, 'bwa', 1);
-insert into stock_par_levels (item_id, branch_id, par_qty) values (15, 'nlb', 1);
-insert into stock_par_levels (item_id, branch_id, par_qty) values (15, 'ksk', 1);
-insert into stock_par_levels (item_id, branch_id, par_qty) values (15, 'bdt', 1);
 insert into stock_par_levels (item_id, branch_id, par_qty) values (16, 'lnd', 3);
 insert into stock_par_levels (item_id, branch_id, par_qty) values (16, 'bwa', 3);
 insert into stock_par_levels (item_id, branch_id, par_qty) values (16, 'nlb', 3);
