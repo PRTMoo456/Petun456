@@ -1,18 +1,20 @@
 // หน้าเจ้าของ — ภาพรวมวันนี้ / สรุปยอดสาขา (แก้ย้อนหลัง) / สต๊อก / เงินเดือน / กำไรขาดทุน / ตั้งค่า
 // พอร์ตตรงจาก ownerView()/ownToday()/ownDay()/ownStock*()/ownPay()/ownPL()/ownSet() ในต้นแบบ nomicha.html
 import { supabase } from '../supabaseClient.js';
-import { getSettings } from '../settings.js';
+import { getSettings, loadSettings, invalidateSettings } from '../settings.js';
 import { $, N, numIn, numSet, baht, signed, esc, toast, todayISO, isoDate, fmtDate, monthKey, monthLabel, monthDates, DAYS } from '../util.js';
-import { loadRefs } from '../refs.js';
+import { loadRefs, invalidateRefs } from '../refs.js';
 import { futureDates } from '../dayoff.js';
 import { whAvailMap, issueExternalSale, editExternalSale } from '../warehouse.js';
 import { loadPeople, peopleCardHTML, bindPeopleCard } from './people.js';
 import { getCompanies, deliveryReportHTML, deliveryMonthHTML, externalBillHTML, externalMonthHTML, staffSlipHTML, reliefSlipHTML, printDoc } from '../print.js';
-import { CLOSE_REASON_OPTIONS, closeStore } from '../close.js';
+import { CLOSE_REASON_OPTIONS, closeStore, closeFormHTML, defaultDraft, draftFromRecord, validateClose, submitClose, updateClose, updateClosure, cancelClosure } from '../close.js';
 import * as calc from '../calc.js';
 
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
-let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, viewBranch: null, range: 7, editing: null, editDraft: {}, stockBranch: null, stockView: 'branch', stockRange: 7 };
+let monthPayrollCache = null;
+let tabLoadTicket = 0;
+let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
 
 export async function renderOwnerApp(root, me) {
   ME = me; TODAY = todayISO();
@@ -24,6 +26,7 @@ export async function renderOwnerApp(root, me) {
 }
 
 async function draw(root) {
+  TODAY = todayISO();
   const tabs = [['today', 'ภาพรวมวันนี้'], ['day', 'สรุปยอดสาขา'], ['sched', 'ตารางงาน'], ['stock', 'สต๊อก'], ['pay', 'เงินเดือน'], ['pl', 'กำไร/ขาดทุน'], ['set', 'ตั้งค่า']];
   root.innerHTML = `<div class="wrap">
     <div class="app-head"><div><h1>โนมิชา · ${BRANCHES.length} สาขา</h1><div class="sub">บริษัท เพตั้น จำกัด</div></div></div>
@@ -46,13 +49,15 @@ function selectOwnerTab(tab) {
 
 async function loadTab() {
   const body = $('#ownBody'); if (!body) return;
-  if (S.tab === 'today') return renderToday(body);
-  if (S.tab === 'day') return renderDay(body);
-  if (S.tab === 'sched') return renderSched(body);
-  if (S.tab === 'stock') return renderStock(body);
-  if (S.tab === 'pay') return renderPay(body);
-  if (S.tab === 'pl') return renderPL(body);
-  return renderSet(body);
+  const ticket=++tabLoadTicket,tab=S.tab;
+  if (tab === 'today') await renderToday(body);
+  else if (tab === 'day') await renderDay(body);
+  else if (tab === 'sched') await renderSched(body);
+  else if (tab === 'stock') await renderStock(body);
+  else if (tab === 'pay') await renderPay(body);
+  else if (tab === 'pl') await renderPL(body);
+  else await renderSet(body);
+  if(ticket!==tabLoadTicket) return loadTab();
 }
 
 /* ============================== ภาพรวมวันนี้ ============================== */
@@ -132,12 +137,17 @@ async function renderDay(body) {
   const cfg = getSettings();
   const b = BRANCHES.find(x => x.id === S.viewBranch) || BRANCHES[0];
   const days = dateRange(S.range);
-  const [{ data: records }, { data: clocks }, { data: pendingRC }, { data: rcLogAll }] = await Promise.all([
+  const [{ data: records }, { data: clocks }, { data: pendingRC }, { data: rcLogAll }, { data: allPeople }] = await Promise.all([
     supabase.from('daily_records').select('*').eq('branch_id', b.id).gte('record_date', days[days.length - 1]).lte('record_date', days[0]),
     supabase.from('clock_records').select('*').eq('branch_id', b.id).gte('clock_date', days[days.length - 1]).lte('clock_date', days[0]),
     supabase.from('recount_requests').select('*').eq('branch_id', b.id).eq('status', 'pending'),
     supabase.from('recount_requests').select('*').eq('branch_id', b.id).neq('status', 'pending').order('requested_at', { ascending: false }).limit(5),
+    supabase.from('employees').select('id,name,role,branch_id').eq('active', true),
   ]);
+  const branchPeople=(allPeople||[]).filter(p=>p.branch_id===b.id&&p.role==='staff');
+  const sellerPeople=(allPeople||[]).filter(p=>(p.branch_id===b.id&&p.role==='staff')||p.role==='relief');
+  const sellerOptions=selected=>[selected,...sellerPeople.map(p=>p.name)].filter((name,i,a)=>name&&a.indexOf(name)===i)
+    .map(name=>`<option value="${esc(name)}" ${name===selected?'selected':''}>${esc(name)}</option>`).join('');
   const clocksByDate = {}; (clocks || []).forEach(c => { clocksByDate[c.clock_date] = c; });
   const recByDate = {}; (records || []).forEach(r => { recByDate[r.record_date] = r; });
   // ดึงประวัติแก้ไขแยกทีหลังด้วย record_id ตรง ๆ (ไม่พึ่งการกรองผ่านตารางที่ join มา — ชัวร์กว่าตอน deploy จริง)
@@ -160,10 +170,12 @@ async function renderDay(body) {
 
   const rows = days.map(d => {
     const r = recByDate[d];
-    if (!r || !r.sent) return `<tr><td>${fmtDate(d)}</td><td colspan="14" style="text-align:left;color:var(--muted)">ยังไม่ส่งยอด</td></tr>`;
+    if (!r || !r.sent) return `<tr><td>${fmtDate(d)}</td><td colspan="14" style="text-align:left;color:var(--muted)">ยังไม่ส่งยอด <button class="mini" data-addhist="${d}">+ เพิ่มยอดย้อนหลัง</button></td></tr>`;
     if (r.store_closed) {
-      const rule = CLOSE_REASON_OPTIONS.find(x => x.value === r.closure_reason);
-      return `<tr><td>${fmtDate(d)}</td><td colspan="14" style="text-align:left"><span class="pill warn">ปิดร้าน</span> <span class="sub">${esc(rule ? rule.label : 'ไม่ระบุสาเหตุ')}</span></td></tr>`;
+      const by=(allPeople||[]).find(p=>p.id===r.created_by)?.name||'ไม่ทราบผู้แจ้ง';
+      return `<tr><td>${fmtDate(d)}</td><td colspan="14" style="text-align:left"><span class="pill warn">ปิดร้าน</span> <span class="sub">แจ้งโดย ${esc(by)}</span>
+        <select class="ctl" data-closurechoice="${r.id}" style="width:auto">${CLOSE_REASON_OPTIONS.map(x=>`<option value="${x.value}" ${x.value===r.closure_reason?'selected':''}>${esc(x.label)} · หัก ${x.quota} วัน</option>`).join('')}</select>
+        <button class="mini" data-closureedit="${r.id}">บันทึกสาเหตุ</button> <button class="mini" data-closurecancel="${r.id}">ยกเลิกปิดร้าน</button></td></tr>`;
     }
     const c = calc.calcDay(r, clocksByDate[d], cfg);
     const ed = (edits || []).filter(e => e.record_id === r.id);
@@ -193,8 +205,28 @@ async function renderDay(body) {
       <td class="n">${baht(r.cash)}</td><td class="n">${baht(r.transfer)}</td>
       <td class="n">${baht(r.grab)}</td><td class="n">${baht(r.thaichaithai)}</td>
       <td class="n" style="font-weight:600">${c.cups}</td>
-      <td class="n ${vc}">${signed(c.variance)} <button class="mini" data-edit="${r.id}" title="แก้ไขตัวเลข">แก้</button></td></tr>`;
+      <td class="n ${vc}">${signed(c.variance)} <button class="mini" data-edit="${r.id}" title="แก้ตัวเลขหลัก">แก้ด่วน</button> <button class="mini" data-fulledit="${r.id}">แก้ทั้งหมด</button></td></tr>`;
   }).join('');
+
+  const fullRec = (records || []).find(r => r.id === S.fullEditing);
+  const editCard = fullRec && S.fullDraft ? `<div class="card pad" id="ownerEditCard" style="margin-bottom:16px;border-left:3px solid var(--brand)">
+      <div class="between"><h3 style="margin:0">แก้ยอดทั้งหมด · ${fmtDate(fullRec.record_date)}</h3><button class="mini" id="ownerFullCancel">ปิด</button></div>
+      <p class="sub">ราคาแก้วและค่าคอมยังใช้ราคาที่บันทึกไว้ของวันนั้น ไม่ย้อนเป็นราคาใหม่</p>
+      <div class="field"><label>ชื่อคนขายจริง</label><select id="ownerEditStaff" class="ctl">${sellerOptions(fullRec.staff_name)}</select></div>
+      <div class="grid2"><div class="field"><label>แก้วเย็นตั้งต้น</label><input id="ownerOpenYen" inputmode="numeric" value="${S.fullOpen?.yen ?? fullRec.open_yen ?? 0}"></div>
+      <div class="field"><label>แก้วปั่นตั้งต้น</label><input id="ownerOpenPan" inputmode="numeric" value="${S.fullOpen?.pan ?? fullRec.open_pan ?? 0}"></div></div>
+      ${closeFormHTML({ draft:S.fullDraft, errors:{}, prev:null, cfg, attr:'of', stockItems:STOCK_ITEMS, intro:'ตรวจและแก้ได้ทุกช่อง ระบบคำนวณใหม่พร้อมเก็บประวัติ' })}
+      <div class="field"><label>เหตุผลที่แก้</label><input id="ownerEditReason" value="แก้ข้อมูลที่กรอกผิด"></div>
+      <button class="btn primary big" id="ownerFullSave">บันทึกและคำนวณใหม่</button></div>` : '';
+
+  const addCard = S.addingDate && S.addDraft ? `<div class="card pad" id="ownerAddCard" style="margin-bottom:16px;border-left:3px solid var(--amber)">
+      <div class="between"><h3 style="margin:0">เพิ่มยอดย้อนหลัง · ${fmtDate(S.addingDate)}</h3><button class="mini" id="ownerAddCancel">ปิด</button></div>
+      <p class="sub">ระบบใช้ราคาปัจจุบันเป็นราคาของรายการใหม่นี้อัตโนมัติ ไม่ต้องกรอกราคาเอง</p>
+      <div class="field"><label>ชื่อคนขาย</label><select id="ownerAddStaff" class="ctl">${sellerOptions(branchPeople?.[0]?.name||'')}</select></div>
+      <div class="grid2"><div class="field"><label>แก้วเย็นตั้งต้น</label><input id="ownerAddOpenYen" inputmode="numeric" value="${S.addOpen?.yen ?? 0}"></div>
+      <div class="field"><label>แก้วปั่นตั้งต้น</label><input id="ownerAddOpenPan" inputmode="numeric" value="${S.addOpen?.pan ?? 0}"></div></div>
+      ${closeFormHTML({ draft:S.addDraft, errors:{}, prev:S.addPrev, cfg, attr:'oa', stockItems:STOCK_ITEMS, intro:'สร้างรายการเฉพาะวันที่ขาดหาย เจ้าของตรวจแล้วบันทึกได้โดยตรง' })}
+      <button class="btn primary big" id="ownerAddSave">บันทึกยอดย้อนหลัง</button></div>` : '';
 
   const rcCard = (pendingRC || []).length ? `<div class="card pad" style="border-left:3px solid var(--bad);margin-bottom:16px">
       <div class="eyebrow">⚠ คำขอตรวจสอบยอดแก้ว</div>
@@ -211,7 +243,7 @@ async function renderDay(body) {
     ยอดนับแก้ว: ${r.old_yen}/${r.old_pan} → ${r.new_yen}/${r.new_pan}
     ${r.status === 'approved' ? '<b>อนุมัติ — บันทึกทับแล้ว</b>' : `<b>ไม่อนุมัติ</b> (ส่วนต่าง ${signed(r.value_diff)} บาท)`}</div>`).join('');
 
-  body.innerHTML = `${rcCard}<div class="between" style="margin-bottom:14px;flex-wrap:wrap">
+  body.innerHTML = `${rcCard}${editCard}${addCard}<div class="between" style="margin-bottom:14px;flex-wrap:wrap">
       <span class="row">
         <select id="bviewSel" class="ctl">${BRANCHES.map(x => `<option value="${x.id}" ${x.id === b.id ? 'selected' : ''}>สาขา${esc(x.name)}</option>`).join('')}</select>
         <span class="seg2">
@@ -247,12 +279,36 @@ async function renderDay(body) {
     <p class="foot">เก็บทุกครั้งที่แก้ยอดย้อนหลัง ใครแก้ แก้อะไร จากเท่าไรเป็นเท่าไร — ใช้ตรวจย้อนหลังได้ว่าตัวเลขเปลี่ยนเพราะอะไร</p>
     ${rcLogRows ? `<div class="card pad" style="margin-top:16px"><div class="eyebrow">ประวัติคำขอตรวจสอบยอดแก้ว</div><div style="margin-top:8px">${rcLogRows}</div></div>` : ''}`;
 
-  $('#bviewSel').addEventListener('change', e => { S.viewBranch = e.target.value; S.editing = null; loadTab(); });
+  $('#bviewSel').addEventListener('change', e => {
+    S.viewBranch=e.target.value;S.editing=null;S.fullEditing=null;S.fullDraft=null;S.addingDate=null;S.addDraft=null;loadTab();
+  });
   body.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', () => { S.range = btn.dataset.range === 'month' ? 'month' : +btn.dataset.range; loadTab(); }));
   body.querySelectorAll('[data-edit]').forEach(btn => btn.addEventListener('click', () => { S.editing = btn.dataset.edit; S.editDraft = {}; loadTab(); }));
+  body.querySelectorAll('[data-fulledit]').forEach(btn => btn.addEventListener('click', () => {
+    const rec = (records || []).find(r => r.id === btn.dataset.fulledit); if (!rec) return;
+    S.fullEditing=rec.id; S.fullDraft=draftFromRecord(rec,STOCK_ITEMS); S.fullOpen={yen:N(rec.open_yen),pan:N(rec.open_pan)}; loadTab();
+  }));
+  body.querySelectorAll('[data-addhist]').forEach(btn => btn.addEventListener('click', async () => {
+    const date=btn.dataset.addhist;
+    const { data: prevRows }=await supabase.from('daily_records').select('*').eq('branch_id',b.id).lt('record_date',date).order('record_date',{ascending:false}).limit(1);
+    const prev=prevRows?.[0]||null; const draft=defaultDraft(prev,b,STOCK_ITEMS);
+    draft.yen=prev?.yen??0; draft.pan=prev?.pan??0; draft.cash=draft.float;
+    S.addingDate=date; S.addPrev=prev; S.addDraft=draft; S.addOpen={yen:prev?.yen??0,pan:prev?.pan??0}; loadTab();
+  }));
   body.querySelectorAll('[data-canceledit]').forEach(btn => btn.addEventListener('click', () => { S.editing = null; loadTab(); }));
   body.querySelectorAll('input[data-ek]').forEach(inp => inp.addEventListener('input', () => { S.editDraft[inp.dataset.ek] = numIn(inp.value); }));
   body.querySelectorAll('[data-save]').forEach(btn => btn.addEventListener('click', () => saveEdit(btn.dataset.save, cfg)));
+  body.querySelectorAll('[data-closureedit]').forEach(btn => btn.addEventListener('click', async () => {
+    const next=body.querySelector(`[data-closurechoice="${CSS.escape(btn.dataset.closureedit)}"]`)?.value;
+    if (!next) return; btn.disabled=true;const { error }=await updateClosure({recordId:btn.dataset.closureedit,reason:next});
+    if(error){toast('แก้สาเหตุไม่สำเร็จ: '+error.message);return;} monthPayrollCache=null;toast('เปลี่ยนสาเหตุปิดร้านแล้ว'); loadTab();
+  }));
+  body.querySelectorAll('[data-closurecancel]').forEach(btn => btn.addEventListener('click', async () => {
+    if(!window.confirm('ยกเลิกสถานะปิดร้านวันนี้ใช่หรือไม่?')) return;
+    const { error }=await cancelClosure({recordId:btn.dataset.closurecancel,reason:'เจ้าของยกเลิกวันที่กดผิด'});
+    if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);return;} monthPayrollCache=null;toast('ยกเลิกปิดร้านแล้ว และเก็บประวัติไว้'); loadTab();
+  }));
+  wireOwnerCloseForm(body,{records,cfg,b,branchPeople});
   body.querySelectorAll('[data-approverc]').forEach(btn => btn.addEventListener('click', () => approveRecount(btn.dataset.approverc)));
   body.querySelectorAll('[data-rejectrc]').forEach(btn => btn.addEventListener('click', () => rejectRecount(btn.dataset.rejectrc)));
 }
@@ -272,60 +328,87 @@ async function saveEdit(recordId, cfg) {
   if (baseYen != null && nv('yen') > baseYen + nv('yen_add')) { toast(`แก้วเย็นเหลือมากกว่าที่มี — ตั้งต้น ${baseYen} + เติม ${nv('yen_add')} = ${baseYen + nv('yen_add')} ใบ`); return; }
   if (basePan != null && nv('pan') > basePan + nv('pan_add')) { toast(`แก้วปั่นเหลือมากกว่าที่มี — ตั้งต้น ${basePan} + เติม ${nv('pan_add')} = ${basePan + nv('pan_add')} ใบ`); return; }
 
-  const patch = {}; const historyWrites = [];
+  const patch = {};
   Object.keys(d).forEach(f => {
     if (d[f] === '' || d[f] == null) return;
     if (N(rec[f]) !== N(d[f])) {
       patch[f] = N(d[f]);
-      historyWrites.push(supabase.from('record_edit_history').insert({
-        record_id: rec.id, field: f, from_value: String(rec[f]), to_value: String(N(d[f])),
-        label: `${FIELD_TH[f]} ${baht(N(rec[f]))} → ${baht(N(d[f]))}`, edited_by: ME.id,
-      }));
     }
   });
   if (!Object.keys(patch).length) { toast('ไม่มีอะไรเปลี่ยน'); S.editing = null; loadTab(); return; }
-  const newYen = patch.yen ?? rec.yen, newPan = patch.pan ?? rec.pan;
-  const snap = { ...(rec.stock_snapshot || {}) };
-  if (STOCK_ITEMS[0]) snap[STOCK_ITEMS[0].id] = Math.floor(N(newYen) / cfg.cupsPerRow.yen);
-  if (STOCK_ITEMS[1]) snap[STOCK_ITEMS[1].id] = Math.floor(N(newPan) / cfg.cupsPerRow.pan);
-  patch.stock_snapshot = snap;
-  await supabase.from('daily_records').update(patch).eq('id', rec.id);
-  await Promise.all(historyWrites);
-  toast(`แก้ไขแล้ว ${historyWrites.length} ช่อง — คิดขาด/เกินใหม่ให้แล้ว`);
+  const draft=draftFromRecord({...rec,...patch},STOCK_ITEMS);
+  const { error }=await updateClose({recordId:rec.id,draft,cfg,stockItems:STOCK_ITEMS,prevSnapshot:rec.stock_snapshot,
+    openYen:N(rec.open_yen??baseYen),openPan:N(rec.open_pan??basePan),reason:'เจ้าของแก้ตัวเลขหลัก'});
+  if(error){toast('แก้ไขไม่สำเร็จ: '+error.message);return;}
+  monthPayrollCache=null;toast(`แก้ไขแล้ว ${Object.keys(patch).length} ช่อง — คิดขาด/เกินใหม่ให้แล้ว`);
   S.editing = null; S.editDraft = {};
   loadTab();
+}
+
+function wireOwnerCloseForm(body,{records,cfg,b,branchPeople}) {
+  const editCard=$('#ownerEditCard');
+  if(editCard){
+    editCard.querySelectorAll('input[data-of]').forEach(inp=>inp.addEventListener('input',()=>{S.fullDraft[inp.dataset.of]=numIn(inp.value);}));
+    editCard.querySelectorAll('input[data-stock]').forEach(inp=>inp.addEventListener('input',()=>{S.fullDraft.stock[inp.dataset.stock]=numIn(inp.value);}));
+    $('#ownerOpenYen')?.addEventListener('input',e=>{S.fullOpen.yen=numIn(e.target.value);});
+    $('#ownerOpenPan')?.addEventListener('input',e=>{S.fullOpen.pan=numIn(e.target.value);});
+    $('#ownerFullCancel')?.addEventListener('click',()=>{S.fullEditing=null;S.fullDraft=null;loadTab();});
+    $('#ownerFullSave')?.addEventListener('click',async()=>{
+      const rec=(records||[]).find(r=>r.id===S.fullEditing); if(!rec)return;
+      const clock={open_yen:N(S.fullOpen.yen),open_pan:N(S.fullOpen.pan)}; const errors=validateClose(S.fullDraft,clock);
+      if(Object.keys(errors).length){toast(Object.values(errors)[0]);return;}
+      const reason=($('#ownerEditReason')?.value||'').trim(); if(!reason){toast('กรอกเหตุผลที่แก้');return;}
+      const btn=$('#ownerFullSave');btn.disabled=true;
+      const staffName=($('#ownerEditStaff')?.value||'').trim();if(!staffName){btn.disabled=false;toast('เลือกชื่อคนขาย');return;}
+      const {error}=await updateClose({recordId:rec.id,draft:S.fullDraft,cfg,stockItems:STOCK_ITEMS,prevSnapshot:rec.stock_snapshot,
+        openYen:clock.open_yen,openPan:clock.open_pan,reason,staffName});
+      if(error){btn.disabled=false;toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+      S.fullEditing=null;S.fullDraft=null;monthPayrollCache=null;toast('แก้ยอดทั้งหมดแล้ว ระบบคำนวณใหม่และเก็บประวัติไว้');loadTab();
+    });
+  }
+  const addCard=$('#ownerAddCard');
+  if(addCard){
+    addCard.querySelectorAll('input[data-oa]').forEach(inp=>inp.addEventListener('input',()=>{S.addDraft[inp.dataset.oa]=numIn(inp.value);}));
+    addCard.querySelectorAll('input[data-stock]').forEach(inp=>inp.addEventListener('input',()=>{S.addDraft.stock[inp.dataset.stock]=numIn(inp.value);}));
+    $('#ownerAddOpenYen')?.addEventListener('input',e=>{S.addOpen.yen=numIn(e.target.value);});
+    $('#ownerAddOpenPan')?.addEventListener('input',e=>{S.addOpen.pan=numIn(e.target.value);});
+    $('#ownerAddCancel')?.addEventListener('click',()=>{S.addingDate=null;S.addDraft=null;loadTab();});
+    $('#ownerAddSave')?.addEventListener('click',async()=>{
+      const name=($('#ownerAddStaff')?.value||'').trim();if(!name){toast('กรอกชื่อคนขาย');return;}
+      const clock={open_yen:N(S.addOpen.yen),open_pan:N(S.addOpen.pan)};const errors=validateClose(S.addDraft,clock);
+      if(Object.keys(errors).length){toast(Object.values(errors)[0]);return;}
+      const btn=$('#ownerAddSave');btn.disabled=true;
+      const {error}=await submitClose({branchId:b.id,dateISO:S.addingDate,staffName:name,draft:S.addDraft,cfg,stockItems:STOCK_ITEMS,
+        prevSnapshot:S.addPrev?.stock_snapshot||{},createdBy:ME.id,openYen:clock.open_yen,openPan:clock.open_pan});
+      if(error){btn.disabled=false;toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+      S.addingDate=null;S.addDraft=null;monthPayrollCache=null;toast('เพิ่มยอดย้อนหลังแล้ว');loadTab();
+    });
+  }
 }
 
 async function approveRecount(id) {
   const { data: req } = await supabase.from('recount_requests').select('*').eq('id', id).single();
   if (!req || req.status !== 'pending') return;
+  let snap=null;
   if (req.prev_record_id) {
     const { data: rec } = await supabase.from('daily_records').select('*').eq('id', req.prev_record_id).single();
     if (rec) {
-      const writes = [];
-      if (N(rec.yen) !== req.new_yen) writes.push(supabase.from('record_edit_history').insert({ record_id: rec.id, field: 'yen', from_value: String(rec.yen), to_value: String(req.new_yen), label: `แก้วเย็น (นับใหม่) ${baht(rec.yen)} → ${baht(req.new_yen)}`, edited_by: ME.id }));
-      if (N(rec.pan) !== req.new_pan) writes.push(supabase.from('record_edit_history').insert({ record_id: rec.id, field: 'pan', from_value: String(rec.pan), to_value: String(req.new_pan), label: `แก้วปั่น (นับใหม่) ${baht(rec.pan)} → ${baht(req.new_pan)}`, edited_by: ME.id }));
       const cfg = getSettings();
-      const snap = { ...(rec.stock_snapshot || {}) };
+      snap = { ...(rec.stock_snapshot || {}) };
       if (STOCK_ITEMS[0]) snap[STOCK_ITEMS[0].id] = Math.floor(N(req.new_yen) / cfg.cupsPerRow.yen);
       if (STOCK_ITEMS[1]) snap[STOCK_ITEMS[1].id] = Math.floor(N(req.new_pan) / cfg.cupsPerRow.pan);
-      await supabase.from('daily_records').update({ yen: req.new_yen, pan: req.new_pan, stock_snapshot: snap }).eq('id', rec.id);
-      await Promise.all(writes);
     }
   }
-  await supabase.from('recount_requests').update({ status: 'approved', resolved_at: new Date().toISOString() }).eq('id', id);
+  const {error}=await supabase.rpc('owner_resolve_recount',{p_request_id:id,p_approve:true,p_stock_snapshot:snap});
+  if(error){toast('อนุมัติไม่สำเร็จ: '+error.message);return;}
+  monthPayrollCache=null;
   toast('อนุมัติแล้ว — บันทึกยอดนับใหม่ทับยอดเดิมเรียบร้อย');
   loadTab();
 }
 async function rejectRecount(id) {
-  const { data: req } = await supabase.from('recount_requests').select('*').eq('id', id).single();
-  if (!req || req.status !== 'pending') return;
-  const { data: clock } = await supabase.from('clock_records').select('*').eq('branch_id', req.branch_id).eq('clock_date', req.request_date).maybeSingle();
-  if (clock && clock.open_yen === req.new_yen && clock.open_pan === req.new_pan) {
-    await supabase.from('clock_records').update({ open_yen: req.old_yen, open_pan: req.old_pan }).eq('branch_id', req.branch_id).eq('clock_date', req.request_date);
-  }
-  await supabase.from('recount_requests').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', id);
-  toast(`ไม่อนุมัติ — กลับไปใช้ยอดเดิม (ส่วนต่าง ${signed(req.value_diff)} บาท บันทึกไว้อ้างอิง)`);
+  const {error}=await supabase.rpc('owner_resolve_recount',{p_request_id:id,p_approve:false,p_stock_snapshot:null});
+  if(error){toast('ไม่อนุมัติไม่สำเร็จ: '+error.message);return;}
+  toast('ไม่อนุมัติ — กลับไปใช้ยอดเดิมและบันทึกผลไว้แล้ว');
   loadTab();
 }
 
@@ -334,34 +417,37 @@ async function rejectRecount(id) {
    ดูว่าเดือนนี้ใครจองหยุดวันไหน หัวหน้าต้องไปแทนที่ไหน และวันไหนเป็นวันส่งของ (ห้ามหยุด) */
 async function renderSched(body) {
   body.innerHTML = `<div class="boot">กำลังโหลด…</div>`;
-  const future = futureDates(TODAY, 31);
+  const upcoming = futureDates(TODAY, 31);
+  const scheduleDays=[];const startDate=new Date(TODAY.slice(0,8)+'01T00:00:00');const endDate=new Date(upcoming[upcoming.length-1]+'T00:00:00');
+  for(let d=new Date(startDate);d<=endDate;d.setDate(d.getDate()+1))scheduleDays.push(isoDate(d));
   const [{ data: dayOffs }, { data: reliefOffs }, { data: employees }] = await Promise.all([
-    supabase.from('day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
-    supabase.from('relief_day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
+    supabase.from('day_offs').select('*').gte('off_date', scheduleDays[0]).lte('off_date', scheduleDays[scheduleDays.length - 1]),
+    supabase.from('relief_day_offs').select('*').gte('off_date', scheduleDays[0]).lte('off_date', scheduleDays[scheduleDays.length - 1]),
     supabase.from('employees').select('*'),
   ]);
-  const offBy = {}; (dayOffs || []).forEach(o => { offBy[o.off_date] = o.branch_id; });
+  const offBy = {}; (dayOffs || []).forEach(o => { offBy[o.off_date] = o; });
   const headOff = new Set((reliefOffs || []).map(o => o.off_date));
   const relief = (employees || []).find(e => e.role === 'relief');
   const staffOf = bid => (employees || []).find(e => e.branch_id === bid && e.role === 'staff')?.name || '(ยังไม่ผูกบัญชี)';
   const roundOn = d => ROUNDS.find(r => r.day_of_week === new Date(d + 'T00:00:00').getDay());
 
-  const months = []; future.forEach(d => { const mk = monthKey(d); if (!months.some(m => m.mk === mk)) months.push({ mk, label: monthLabel(d) }); });
+  const months = []; scheduleDays.forEach(d => { const mk = monthKey(d); if (!months.some(m => m.mk === mk)) months.push({ mk, label: monthLabel(d) }); });
   const curMk = (S.schedMonth && months.some(m => m.mk === S.schedMonth)) ? S.schedMonth : months[0].mk;
-  const inMonth = future.filter(d => monthKey(d) === curMk);
+  const inMonth = scheduleDays.filter(d => monthKey(d) === curMk);
 
   const rows = inMonth.map(d => {
-    const bid = offBy[d], r = roundOn(d);
+    const off = offBy[d], bid = off?.branch_id, r = roundOn(d);
     const b = bid ? BRANCHES.find(x => x.id === bid) : null;
     return `<tr><td>${fmtDate(d)} <span class="sub">${DAYS[new Date(d + 'T00:00:00').getDay()]}</span></td>
       <td>${r ? '<span class="sub">ส่งของ — ห้ามหยุด</span>'
         : b ? `สาขา${esc(b.name)} — ${esc(staffOf(bid))}` : '<span class="sub">ไม่มีใครหยุด</span>'}</td>
       <td>${headOff.has(d) ? '<span class="pill warn">หยุด</span>' : b ? esc(relief?.name || 'หัวหน้า') : '<span class="sub">—</span>'}</td>
-      <td>${r ? `<span class="pill warn">${esc(r.name)}</span>` : ''}</td></tr>`;
+      <td>${r ? `<span class="pill warn">${esc(r.name)}</span>` : ''}</td>
+      <td>${off ? `<input type="date" data-offnew="${off.id}" value="${off.off_date}" style="width:145px"> <button class="mini" data-offchange="${off.id}" data-offdate="${off.off_date}">บันทึกวันใหม่</button> <button class="mini" data-offcancel="${off.id}">ยกเลิก</button>` : '—'}</td></tr>`;
   }).join('');
 
   const quota = BRANCHES.map(b => {
-    const used = inMonth.filter(d => offBy[d] === b.id).length;
+    const used = inMonth.filter(d => offBy[d]?.branch_id === b.id).length;
     return `<div class="setrow"><span>${esc(staffOf(b.id))} <span class="sub">${esc(b.name)}</span></span>
       <span class="n">${used} / ${b.days_off_quota} วัน</span></div>`;
   }).join('');
@@ -372,9 +458,9 @@ async function renderSched(body) {
       <span class="seg2">${months.map(m => `<button data-schedmonth="${m.mk}" aria-pressed="${m.mk === curMk}">${esc(m.label)}</button>`).join('')}</span>
     </div>
     <div class="card pad" style="margin-bottom:16px">
-      <div class="between" style="margin-bottom:10px"><h3 style="margin:0">แจ้งปิดร้าน</h3><span class="sub">เลือกได้ทุกสาขาและทุกวัน</span></div>
+      <div class="between" style="margin-bottom:10px"><h3 style="margin:0">แจ้งปิดร้าน</h3><span class="sub">เลือกย้อนหลังได้ถึงวันนี้</span></div>
       <div class="field"><label>สาขา</label><select id="closeBranch" class="ctl">${BRANCHES.map(b => `<option value="${b.id}">สาขา${esc(b.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>วันที่ปิดร้าน</label><input type="date" id="closeDate" value="${TODAY}"></div>
+      <div class="field"><label>วันที่ปิดร้าน</label><input type="date" id="closeDate" value="${TODAY}" max="${TODAY}"></div>
       <div class="field"><label>สาเหตุ</label><select id="closeReason" class="ctl">${CLOSE_REASON_OPTIONS.map(r => `<option value="${r.value}">${esc(r.label)} — หักโควตาวันหยุด ${r.quota} วัน</option>`).join('')}</select></div>
       <button class="btn primary" id="closeStoreBtn">บันทึกปิดร้าน</button>
       <p class="sub" style="margin:8px 0 0">คัดลอกยอดแก้ว สต๊อก และเงินทอนจากวันก่อนหน้า โดยยอดขายเป็นศูนย์</p>
@@ -387,15 +473,28 @@ async function renderSched(body) {
         <span class="n">${headUsed} / ${relief?.days_off_quota ?? 4} วัน</span></div>
     </div>
     <div class="tablewrap"><table>
-      <thead><tr><th>วันที่</th><th>สาขาที่หยุด</th><th>หัวหน้า</th><th>รอบส่งของ</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="4" class="sub">ไม่มีวันที่ในเดือนนี้ในช่วงจองล่วงหน้า</td></tr>'}</tbody></table></div>
+      <thead><tr><th>วันที่</th><th>สาขาที่หยุด</th><th>หัวหน้า</th><th>รอบส่งของ</th><th>เจ้าของจัดการ</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="sub">ไม่มีวันที่ในเดือนนี้ในช่วงจองล่วงหน้า</td></tr>'}</tbody></table></div>
     <p class="foot">วันหนึ่งให้หยุดได้สาขาเดียว เพราะมีหัวหน้าคนเดียว — พนักงานและหัวหน้าจองเองในแอป ระบบกันวันซ้ำให้ ·
-      <b>วันส่งของห้ามใครหยุด</b> ระบบกันไว้ให้ตั้งแต่ตอนจอง · แสดงเฉพาะวันที่อยู่ในช่วง 31 วันข้างหน้าของเดือนนั้น</p>`;
+      <b>วันส่งของห้ามใครหยุด</b> ระบบกันไว้ให้ตั้งแต่ตอนจอง · เจ้าของดูย้อนหลังตั้งแต่ต้นเดือนนี้และดูล่วงหน้า 31 วัน</p>`;
   body.querySelectorAll('[data-schedmonth]').forEach(btn => btn.addEventListener('click', () => { S.schedMonth = btn.dataset.schedmonth; renderSched(body); }));
+  body.querySelectorAll('[data-offchange]').forEach(btn=>btn.addEventListener('click',async()=>{
+    const next=body.querySelector(`[data-offnew="${CSS.escape(btn.dataset.offchange)}"]`)?.value;if(!next||next===btn.dataset.offdate)return;
+    btn.disabled=true;
+    const {error}=await supabase.rpc('owner_update_day_off',{p_day_off_id:btn.dataset.offchange,p_new_date:next,p_cancel:false});
+    if(error){toast('เปลี่ยนวันหยุดไม่สำเร็จ: '+error.message);return;}toast('เปลี่ยนวันหยุดแล้ว และเก็บประวัติไว้');renderSched(body);
+  }));
+  body.querySelectorAll('[data-offcancel]').forEach(btn=>btn.addEventListener('click',async()=>{
+    if(!window.confirm('ยกเลิกวันหยุดที่เลือกใช่หรือไม่?'))return;
+    const {error}=await supabase.rpc('owner_update_day_off',{p_day_off_id:btn.dataset.offcancel,p_new_date:null,p_cancel:true});
+    if(error){toast('ยกเลิกวันหยุดไม่สำเร็จ: '+error.message);return;}toast('ยกเลิกวันหยุดแล้ว และเก็บประวัติไว้');renderSched(body);
+  }));
   $('#closeStoreBtn').addEventListener('click', async () => {
+    const btn = $('#closeStoreBtn'); btn.disabled = true;
     const result = await closeStore({ branchId: $('#closeBranch').value, dateISO: $('#closeDate').value,
-      reason: $('#closeReason').value, createdBy: ME.id });
-    if (result.error) { toast('บันทึกปิดร้านไม่สำเร็จ: ' + result.error); return; }
+      reason: $('#closeReason').value });
+    if (result.error) { btn.disabled = false; toast('บันทึกปิดร้านไม่สำเร็จ: ' + result.error); return; }
+    monthPayrollCache=null;
     toast(`บันทึกปิดร้านแล้ว — ${result.reason.label} (หักโควตา ${result.reason.quota} วัน)`);
     renderSched(body);
   });
@@ -528,7 +627,7 @@ async function renderStockDeliveries(el, seg) {
   const b = BRANCHES.find(x => x.id === S.stockBranch) || BRANCHES[0];
   const overuse = getSettings().overuseThresholdUnits;   // เกณฑ์ "ผิดปกติ" จากตาราง settings (เดิมฝังเลข 0.5 ไว้ในโค้ด)
   const [{ data: list }, { data: employees }] = await Promise.all([
-    supabase.from('deliveries').select('*').eq('branch_id', b.id).order('delivery_date', { ascending: false }),
+    supabase.from('deliveries').select('*').eq('branch_id', b.id).order('delivery_date', { ascending: false }).limit(60),
     supabase.from('employees').select('*'),
   ]);
   const staffEmp = (employees || []).find(e => e.branch_id === b.id && e.role === 'staff');
@@ -536,7 +635,8 @@ async function renderStockDeliveries(el, seg) {
   const cards = (list || []).map(dlv => {
     const items = Object.entries(dlv.items);
     const totalQty = items.reduce((s, [, qty]) => s + qty, 0);
-    const totalCost = items.reduce((s, [id, qty]) => { const it = STOCK_ITEMS.find(x => String(x.id) === id); return s + (it ? qty * it.branch_price : 0); }, 0);
+    const totalCost = items.reduce((s, [id, qty]) => { const it = STOCK_ITEMS.find(x => String(x.id) === id);
+      const price=dlv.price_snapshot?.[id]??it?.branch_price??0;return s+qty*N(price); }, 0);
     const flagCount = dlv.received ? items.filter(([id, qty]) => { const rq = dlv.received[id]; return rq != null && Math.abs(qty - rq) > overuse; }).length : 0;
     const open = S.deliveryOpen && S.deliveryOpen[dlv.id];
     const roundName = (ROUNDS.find(r => r.id === dlv.round_id) || {}).name || dlv.round_id;
@@ -589,12 +689,13 @@ async function renderStockDeliveries(el, seg) {
    ชุดข้อมูล+สูตรเงินเดือนของเดือนนี้ ใช้ร่วมกันทั้งแท็บ "เงินเดือน" และแท็บ "กำไร/ขาดทุน"
    (เดิมสองแท็บดึงข้อมูลและคำนวณแยกกันคนละชุด ถ้าแก้สูตรที่เดียวลืมอีกที่ ตัวเลขค่าแรงสองหน้าจะไม่ตรงกันทันที) */
 async function loadMonthPayroll() {
+  const cacheKey = TODAY.slice(0, 7);
+  if (monthPayrollCache && monthPayrollCache.key === cacheKey && Date.now() - monthPayrollCache.at < 30000) return monthPayrollCache.data;
   const cfg = getSettings();
   const dates = monthDates(TODAY);
-  const [{ data: allRecords }, { data: allClocks }, { data: allAdvances }, { data: whRentRows }, { data: employees }] = await Promise.all([
+  const [{ data: allRecords }, { data: allClocks }, { data: whRentRows }, { data: employees }] = await Promise.all([
     supabase.from('daily_records').select('*').gte('record_date', dates[0]).lte('record_date', dates[dates.length - 1]),
     supabase.from('clock_records').select('*').gte('clock_date', dates[0]).lte('clock_date', dates[dates.length - 1]),
-    supabase.from('advances').select('*'),
     supabase.from('warehouse_rent_history').select('*').order('effective_from'),
     supabase.from('employees').select('*'),
   ]);
@@ -606,70 +707,57 @@ async function loadMonthPayroll() {
   const payPeople = BRANCHES.map(b => {
     const emp = (employees || []).find(e => e.branch_id === b.id && e.role === 'staff');
     const records = (allRecords || []).filter(r => r.branch_id === b.id);
-    // เบิก/กู้ของสาขา คิดรวมเป็นก้อนของสาขาเหมือนกัน (ของหัวหน้า branch_id เป็น null อยู่แล้ว จึงไม่ปนเข้ามา)
-    const advancesForStaff = (allAdvances || []).filter(a => a.branch_id === b.id);
     const pr = calc.payrollFor({
       branch: { relief_name: relief?.name, base_salary: emp?.base_salary ?? 0, days_off_quota: b.days_off_quota, holiday_work_days: b.holiday_work_days || 0 },
-      records, clocksByDate: clocksByDateAll[b.id] || {}, allDatesInMonth: dates, advancesForStaff, todayISO: TODAY, cfg,
+      records, clocksByDate: clocksByDateAll[b.id] || {}, allDatesInMonth: dates, todayISO: TODAY, cfg,
     });
     return { key: b.id, b, records, emp, name: emp?.name || '(ยังไม่ผูกบัญชี)', place: b.name, base: emp?.base_salary ?? 0, pr };
   });
-  const advancesForRelief = (allAdvances || []).filter(a => a.branch_id == null && a.staff_name === relief?.name);
   const prR = calc.payrollForRelief({
     relief: { name: relief?.name, base_salary: relief?.base_salary ?? 0, delivery_pay: relief?.delivery_pay ?? 0 },
-    allBranchRecords: allRecords || [], allBranchClocksByDate: clocksByDateAll, advancesForRelief, todayISO: TODAY, cfg, whRent,
+    allBranchRecords: allRecords || [], allBranchClocksByDate: clocksByDateAll, todayISO: TODAY, cfg, whRent,
   });
-  return { cfg, dates, allRecords: allRecords || [], clocksByDateAll, employees: employees || [], relief, whRent, payPeople, prR };
+  const data = { cfg, dates, allRecords: allRecords || [], clocksByDateAll, employees: employees || [], relief, whRent, payPeople, prR };
+  monthPayrollCache = { key: cacheKey, at: Date.now(), data };
+  return data;
 }
 
 async function renderPay(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
-  const [{ cfg, allRecords, relief, payPeople, prR }, { data: allRemits }, { data: headRemits }, { data: allOffsets }, { data: cashRecords }] = await Promise.all([
+  const [{ relief, payPeople, prR }, { data: allRemits }, { data: headRemits }, { data: cashRecords }] = await Promise.all([
     loadMonthPayroll(),
     supabase.from('cash_remittances').select('*'),
     supabase.from('head_remittances').select('*'),
-    supabase.from('remit_loan_offsets').select('*'),
     supabase.from('daily_records').select('branch_id,record_date,cash,float_cash,sent').eq('sent', true),
   ]);
-  const all = [...payPeople.map(p => ({ ...p, ab: p.pr.advBreak, gross: p.pr.total + p.pr.advanceDeduct })),
-    { key: 'relief', name: relief?.name || 'หัวหน้า', place: 'คลังกลาง', pr: prR, ab: prR.advBreak, gross: prR.total + prR.advanceDeduct }];
-
-  const dash = v => v ? baht(v) : '–';
   const staffRows = payPeople.map(p => `<tr><td>${esc(p.name)} <span class="sub">${esc(p.place)}</span></td>
       <td class="n">${baht(p.base)}</td>
       <td class="n ${p.pr.reset ? 'neg' : ''}">${baht(p.pr.diligence)}${p.pr.reset ? ' ⚠' : ''}</td>
       <td class="n">${baht(p.pr.holidayPay)}</td>
       <td class="n" title="${p.pr.cups} แก้ว">${baht(p.pr.cupPay)}</td>
       <td class="n ${p.pr.deduct ? 'neg' : ''}" title="${[p.pr.daysOffTaken ? `ใช้วันหยุด ${p.pr.daysOffTaken}/${p.b.days_off_quota} วัน` : '', p.pr.late ? `สาย ${p.pr.late} นาที` : '', p.pr.early ? `ปิดไว ${p.pr.early} นาที` : '', p.pr.noClock ? `ลืมลงเวลา ${p.pr.noClock} ครั้ง` : '', p.pr.excess ? `หยุดเกินโควตา ${p.pr.excess} วัน` : ''].filter(Boolean).join(' · ') || 'ไม่มีรายการหัก'}">${p.pr.deduct ? '−' + baht(p.pr.deduct) : '0'}${p.pr.noClock ? ` <span class="sub">(ลืมลงเวลา ${p.pr.noClock})</span>` : ''}</td>
-      <td class="n" style="font-weight:600">${baht(p.pr.total + p.pr.advanceDeduct)}</td></tr>`).join('');
+      <td class="n" style="font-weight:600">${baht(p.pr.total)}</td></tr>`).join('');
   const reliefBaseAll = (relief?.base_salary ?? 0) + (relief?.delivery_pay ?? 0) + prR.whRent;
   const reliefRow = `<tr><td>${esc(relief?.name || 'หัวหน้า')} <span class="sub">คลังกลาง</span></td>
       <td class="n" title="ฐาน + เงินส่งของ + ค่าเช่าคลังกลาง">${baht(reliefBaseAll)}</td><td class="n">–</td><td class="n">–</td>
       <td class="n" title="${prR.cups} แก้ว">${baht(prR.cupPay)}</td>
       <td class="n ${prR.deduct ? 'neg' : ''}" title="หัวหน้าไม่หักมาสาย/ปิดไว${prR.noClock ? ` · ลืมลงเวลา ${prR.noClock} ครั้ง` : ''}">${prR.deduct ? '−' + baht(prR.deduct) : '0'}${prR.noClock ? ` <span class="sub">(ลืมลงเวลา ${prR.noClock})</span>` : ''}</td>
-      <td class="n" style="font-weight:600">${baht(prR.total + prR.advanceDeduct)}</td></tr>`;
+      <td class="n" style="font-weight:600">${baht(prR.total)}</td></tr>`;
 
-  const r20People = all.filter(p => p.ab.r20.advance || p.ab.r20.loan || p.ab.r20.remit);
-  const r20Total = r20People.reduce((s, p) => s + p.ab.r20.payout, 0);
-  const r20Rows = r20People.map(p => `<tr><td>${esc(p.name)}</td><td class="sub">${esc(p.place)}</td>
-      <td class="n">${dash(p.ab.r20.advance)}</td><td class="n">${dash(p.ab.r20.loan)}</td><td class="n">${dash(p.ab.r20.remit)}</td>
-      <td class="n" style="font-weight:700">${baht(p.ab.r20.payout)}</td></tr>`).join('');
-  const r5Total = all.reduce((s, p) => s + p.pr.total, 0);
-  const r5Rows = all.map(p => `<tr><td>${esc(p.name)}</td><td class="sub">${esc(p.place)}</td>
-      <td class="n">${baht(p.gross)}</td><td class="n">${dash(p.ab.advance)}</td><td class="n">${dash(p.ab.loan)}</td><td class="n">${dash(p.ab.remit)}</td>
-      <td class="n" style="font-weight:700">${baht(p.pr.total)}</td></tr>`).join('');
+  const salaryTotal = payPeople.reduce((s, p) => s + p.pr.total, prR.total);
 
   const cashRows = BRANCHES.map(b => {
-    const branchRemits = (allRemits || []).filter(x => x.branch_id === b.id).sort((a, c) => a.remit_date < c.remit_date ? 1 : -1);
-    const lastRemitDate = branchRemits[0]?.remit_date || null;
-    const records = (cashRecords || []).filter(r => r.branch_id === b.id);
-    const offset = (allOffsets || []).find(x => x.branch_id === b.id);
-    const p = calc.cashPending(records, lastRemitDate, offset ? N(offset.amount) : 0);
-    return `<tr><td>${esc(b.name)}</td><td class="n">${baht(p.amount)}</td><td class="n">${p.dates.length}</td><td class="n">${lastRemitDate ? fmtDate(lastRemitDate) : '—'}</td></tr>`;
+    const branchRemits = (allRemits || []).filter(x => x.branch_id === b.id)
+      .sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)));
+    const lastRemitDate = branchRemits[0]?.through_record_date || branchRemits[0]?.remit_date || null;
+    const records = (cashRecords || []).filter(r => r.branch_id === b.id && (!b.cash_tracking_from || r.record_date >= b.cash_tracking_from));
+    const p = calc.cashPending(records, lastRemitDate);
+    return `<tr><td>${esc(b.name)}</td><td class="n">${baht(p.amount)}</td><td class="n">${p.dates.length}</td><td class="n">${lastRemitDate ? fmtDate(lastRemitDate) : b.cash_tracking_from ? `เริ่ม ${fmtDate(b.cash_tracking_from)}` : '—'}</td></tr>`;
   }).join('');
 
-  const collected = (allRemits || []).filter(x => x.method !== 'loan').reduce((s, x) => s + N(x.amount), 0);
-  const forwarded = (headRemits || []).reduce((s, x) => s + N(x.amount), 0);
+  const cashStart=BRANCHES.reduce((m,b)=>!m||b.cash_tracking_from>m?b.cash_tracking_from:m,null);
+  const collected = (allRemits || []).filter(x=>x.method==='cash'&&(!cashStart||x.remit_date>=cashStart)).reduce((s, x) => s + N(x.amount), 0);
+  const forwarded = (headRemits || []).filter(x=>!cashStart||x.remit_date>=cashStart).reduce((s, x) => s + N(x.amount), 0);
   const headHeld = collected - forwarded;
   const headLogRows = (headRemits || []).slice().reverse().map(e => `<tr><td class="n">${fmtDate(e.remit_date)}</td><td class="n">${baht(e.amount)}</td><td>${e.method === 'cash' ? 'เงินสด' : 'โอนเงิน'}</td></tr>`).join('');
 
@@ -680,18 +768,10 @@ async function renderPay(body) {
       <tbody>${staffRows}${reliefRow}</tbody></table></div>
     <p class="foot">แตะที่ช่อง "หัก" เพื่อดูว่ามาจากอะไร · <b>ลืมลงเวลา</b> (ลงไม่ครบทั้งเข้า-ออก) หัก 40 บาท/ครั้ง · มาสาย/ปิดไว หักนาทีละ 1 บาท —
       <b>หัวหน้าไม่หักมาสาย/ปิดไว</b> เพราะไปทำแทนหลายสาขาคนละเวลา แต่ยังต้องลงเวลาให้ครบ ·
-      "เงินเดือนสุทธิ" คือยอดก่อนหักเบิก/เงินกู้ — ยอดจ่ายจริงอยู่ในตาราง "จ่ายเงินเดือน" ด้านล่าง</p>
+      ยอดสุทธิคือจำนวนที่ต้องจ่ายจริงจากรายการทำงานในระบบ</p>
 
-    <h3 style="margin:22px 0 10px">จ่ายเงินเดือน</h3>
-    <div class="eyebrow" style="margin-bottom:6px">รอบวันที่ ${cfg.advanceDay} — จ่ายเงินเบิก</div>
-    <div class="tablewrap"><table><thead><tr><th>ชื่อ</th><th>สาขา</th><th>เงินเบิก</th><th>เงินกู้</th><th>เงินสดร้านตัดมา</th><th>จ่ายเพิ่ม</th></tr></thead>
-      <tbody>${r20Rows || '<tr><td colspan="6" class="sub">รอบนี้ยังไม่มีใครขอเบิก</td></tr>'}</tbody>
-      ${r20People.length ? `<tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td colspan="5">รวมเงินสดที่ต้องเตรียมจ่าย</td><td class="n">${baht(r20Total)}</td></tr></tfoot>` : ''}</table></div>
-
-    <div class="eyebrow" style="margin:18px 0 6px">รอบวันที่ ${cfg.settleDays[0]} — จ่ายเงินเดือน</div>
-    <div class="tablewrap"><table><thead><tr><th>ชื่อ</th><th>สาขา</th><th>เงินเดือน</th><th>เงินเบิก</th><th>เงินกู้</th><th>เงินสดร้านตัดมา</th><th>จ่ายเพิ่ม</th></tr></thead>
-      <tbody>${r5Rows}</tbody>
-      <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td colspan="6">รวมเงินสดที่ต้องเตรียมจ่าย</td><td class="n">${baht(r5Total)}</td></tr></tfoot></table></div>
+    <div class="card pad" style="margin-top:16px"><div class="between"><span class="eyebrow">รวมเงินเดือนที่ต้องจ่าย</span>
+      <span class="bigtime" style="font-size:22px">${baht(salaryTotal)} บาท</span></div></div>
 
     <h3 style="margin:22px 0 10px">เงินสดค้างที่สาขา</h3>
     <div class="tablewrap"><table><thead><tr><th>สาขา</th><th>ค้างส่ง</th><th>ค้างกี่วัน</th><th>ส่ง/รับล่าสุด</th></tr></thead><tbody>${cashRows}</tbody></table></div>
@@ -721,7 +801,9 @@ async function renderPay(body) {
   });
   const hc = $('#ownerConfirmHeadBtn'); if (hc) hc.addEventListener('click', async () => {
     if (headHeld <= 0) { toast('ไม่มีเงินสดค้างรับ'); return; }
-    await supabase.from('head_remittances').insert({ remit_date: TODAY, amount: headHeld, method: 'cash' });
+    hc.disabled = true;
+    const { error } = await supabase.from('head_remittances').insert({ remit_date: TODAY, amount: headHeld, method: 'cash' });
+    if (error) { hc.disabled = false; toast('บันทึกรับเงินไม่สำเร็จ: ' + error.message); return; }
     toast('บันทึกว่ารับเงินจากหัวหน้าแล้ว ' + baht(headHeld) + ' บาท');
     loadTab();
   });
@@ -738,7 +820,7 @@ async function renderPL(body) {
     supabase.from('repairs').select('*').gte('repair_date', dates[0]).lte('repair_date', dates[dates.length - 1]),
     supabase.from('purchases').select('*').order('purchase_date', { ascending: false }).limit(12),
     supabase.from('warehouse_stock').select('*'),
-    supabase.from('external_sales').select('*').order('sale_date', { ascending: false }),
+    supabase.from('external_sales').select('*').gte('sale_date', dates[0]).lte('sale_date', dates[dates.length - 1]).order('sale_date', { ascending: false }),
   ]);
   const stockItemsById = {}; STOCK_ITEMS.forEach(it => { stockItemsById[it.id] = { branch_price: it.branch_price, unit: it.unit, per_case: it.per_case, name: it.name }; });
   if (whError) throw whError;
@@ -746,13 +828,13 @@ async function renderPL(body) {
 
   // ค่าแรงในตารางนี้ = ตัวเดียวกับที่โชว์ในแท็บเงินเดือน (payPeople มาจาก loadMonthPayroll ชุดเดียวกัน)
   const rows = payPeople.map(({ b, records, pr }) => {
-    const { sales, grab } = calc.aggregateBranchSales(records, clocksByDateAll[b.id] || {}, cfg);
-    const dlv = (deliveries || []).filter(x => x.branch_id === b.id).map(x => ({ items: x.items, received: x.received }));
+    const { sales, grab, grabCommission } = calc.aggregateBranchSales(records, clocksByDateAll[b.id] || {}, cfg);
+    const dlv = (deliveries || []).filter(x => x.branch_id === b.id).map(x => ({ items: x.items, received: x.received, price_snapshot:x.price_snapshot }));
     const materialCost = calc.monthMaterialCost(dlv, stockItemsById);
     const rentHistory = (branchRentRows || []).filter(r => r.branch_id === b.id).map(r => ({ from: r.effective_from, rent: r.rent }));
     const rent = calc.rentAt(rentHistory, dates[0]);
     const branchRepairs = (repairs || []).filter(r => r.branch_id === b.id);
-    return { b, x: calc.branchPL({ sales, grab, materialCost, rent, repairs: branchRepairs, grabCommissionPct: cfg.grabCommissionPct, payroll: pr }) };
+    return { b, x: calc.branchPL({ sales, grab, grabCommission, materialCost, rent, repairs: branchRepairs, grabCommissionPct: cfg.grabCommissionPct, payroll: pr }) };
   });
   const totSales = rows.reduce((s, x) => s + x.x.sales, 0);
   const totMat = rows.reduce((s, x) => s + x.x.materialCost, 0);
@@ -764,7 +846,7 @@ async function renderPL(body) {
   const totNet = rows.reduce((s, x) => s + x.x.net, 0);
 
   const avgCostById = {}; STOCK_ITEMS.forEach(it => { const row = (whStock || []).find(s => s.item_id === it.id); avgCostById[it.id] = row?.avg_cost ?? 0; });
-  const allDeliveries = (deliveries || []).map(x => ({ items: x.items, received: x.received }));
+  const allDeliveries = (deliveries || []).map(x => ({ items: x.items, received: x.received, price_snapshot:x.price_snapshot, cost_snapshot:x.cost_snapshot }));
   // ยอดขายนอกสาขาที่เข้ากำไรคลังกลาง ต้องนับเฉพาะบิลของเดือนนี้ ให้ตรงกับช่วงเดียวกับการส่งของ/ค่าแรง
   const allExternal = (externalSales || []).filter(s => s.sale_date >= dates[0] && s.sale_date <= dates[dates.length - 1]).map(s => ({ items: s.items }));
   const wh = calc.warehousePL({ deliveries: allDeliveries, externalSales: allExternal, stockItemsById, avgCostById, reliefPayroll: prR });
@@ -827,7 +909,7 @@ async function renderPL(body) {
       <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td>รวม</td><td class="n">${baht(totSales + wh.sales)}</td><td class="n">${baht(totMat + wh.cost)}</td>
         <td class="n">${(totRate * 100).toFixed(1)}%</td><td class="n">${baht(totLabor + wh.headLabor)}</td><td class="n">${baht(totRent)}</td>
         <td class="n">${baht(totRepair)}</td><td class="n">${baht(totGrabComm)}</td><td class="n ${companyNet < 0 ? 'neg' : ''}">${signed(companyNet)}</td></tr></tfoot></table></div>
-    <p class="foot">"อัตราการใช้วัตถุดิบ" = ต้นทุนวัตถุดิบ ÷ ยอดขาย · ค่าคอมแกร๊บ = ยอดขายผ่านแกร๊บ × ${(cfg.grabCommissionPct * 100).toFixed(1)}% ·
+    <p class="foot">"อัตราการใช้วัตถุดิบ" = ต้นทุนวัตถุดิบ ÷ ยอดขาย · ค่าคอมแกร๊บใช้อัตราที่บันทึกไว้ของแต่ละวัน ·
       แถวคลังกลาง: ยอดขาย = ของที่ส่งออกทั้งหมด×ราคาส่งสาขา, ต้นทุน = ของเดียวกัน×ต้นทุนเฉลี่ยจริง, ค่าแรง = เงินเดือนหัวหน้าเต็มจำนวน (รวมค่าเช่าคลังกลางแล้ว)</p>
 
     <div class="between" style="margin:22px 0 10px"><h3 style="margin:0">ขายนอกสาขา</h3>
@@ -873,7 +955,8 @@ async function renderPL(body) {
   }));
   body.querySelectorAll('[data-extpaid]').forEach(btn => btn.addEventListener('click', async () => {
     const sale = (externalSales || []).find(x => x.id === btn.dataset.extpaid); if (!sale) return;
-    await supabase.from('external_sales').update({ paid: !sale.paid }).eq('id', sale.id);
+    const {error}=await supabase.rpc('set_external_sale_paid',{p_sale_id:sale.id,p_paid:!sale.paid});
+    if(error){toast('เปลี่ยนสถานะชำระเงินไม่สำเร็จ: '+error.message);return;}
     toast(!sale.paid ? 'บันทึกว่าลูกค้าโอนเงินแล้ว' : 'เปลี่ยนกลับเป็นรอลูกค้าโอน');
     renderPL(body);
   }));
@@ -885,8 +968,9 @@ async function renderPL(body) {
   const oes = $('#ownExtSubmit'); if (oes) oes.addEventListener('click', async () => {
     const buyer = (S.extBuyer || '').trim();
     const lines = STOCK_ITEMS.map(it => ({ it, qty: N(S.extDraft[it.id]) })).filter(l => l.qty > 0);
+    oes.disabled = true; oes.textContent = 'กำลังออกบิล…';
     const res = await issueExternalSale({ buyer, lines, issuerId: ME.id, stockItems: STOCK_ITEMS, avail: extAvail });
-    if (res.error) { toast(res.error); return; }
+    if (res.error) { oes.disabled = false; toast(res.error); return; }
     S.extOpen = false; S.extBuyer = ''; S.extDraft = {};
     toast(`ออกบิลให้ ${buyer} แล้ว ${baht(res.total)} บาท`);
     renderPL(body);
@@ -900,9 +984,10 @@ async function renderPL(body) {
   }));
   body.querySelectorAll('[data-extsave]').forEach(btn => btn.addEventListener('click', async () => {
     const sale = (externalSales || []).find(x => x.id === btn.dataset.extsave); if (!sale) return;
+    btn.disabled = true;
     const res = await editExternalSale({ sale: JSON.parse(JSON.stringify(sale)), draftQty: S.extEditDraft,
       stockItems: STOCK_ITEMS, avail: extAvail, byName: ME.name });
-    if (res.error) { toast(res.error); return; }
+    if (res.error) { btn.disabled = false; toast(res.error); return; }
     toast(res.cancelled ? 'ยกเลิกบิลแล้ว — คืนของเข้าคลังกลางครบ' : `แก้ไขบิลแล้ว ${res.changes} รายการ — ปรับสต๊อกคลังกลางให้แล้ว`);
     S.extEditing = null; S.extEditDraft = {}; renderPL(body);
   }));
@@ -916,7 +1001,9 @@ async function renderPL(body) {
     const bid = $('#repairBidSel').value, desc = ($('#repairDesc').value || '').trim(), cost = N($('#repairCost').value);
     if (!desc) { toast('กรอกรายการที่ซ่อมด้วย'); return; }
     if (cost <= 0) { toast('กรอกค่าใช้จ่ายให้ถูกต้อง'); return; }
-    await supabase.from('repairs').insert({ branch_id: bid, repair_date: TODAY, description: desc, cost });
+    rs.disabled = true;
+    const { error } = await supabase.from('repairs').insert({ branch_id: bid, repair_date: TODAY, description: desc, cost });
+    if (error) { rs.disabled = false; toast('บันทึกไม่สำเร็จ: ' + error.message); return; }
     toast('บันทึกรายการซ่อมเรียบร้อย');
     S.repairOpen = false; S.repairDesc = ''; S.repairCost = '';
     renderPL(body);
@@ -981,7 +1068,6 @@ async function renderSet(body) {
 
   const settingsByKey = {}; (settingsRows || []).forEach(s => { settingsByKey[s.key] = s.value; });
   const genericKeys = [['grab_commission_pct', 'ค่าคอมแกร๊บ (สัดส่วน เช่น 0.321)'],
-    ['advance_cap', 'วงเงินเบิกรอบวันที่ 20 (บาท)'], ['loan_cap', 'วงเงินเงินกู้ (บาท)'], ['loan_interest_pct', 'ดอกเบี้ยเงินกู้ (สัดส่วน)'],
     ['overuse_threshold_units', 'เกณฑ์ผลต่างรับของที่ถือว่าผิดปกติ (หน่วย)']];
   const genericRows = genericKeys.map(([k, label]) => `<div class="setrow"><span>${label}</span>
       <input value="${JSON.stringify(settingsByKey[k] ?? '')}" data-settingkey="${k}" style="width:110px"></div>`).join('');
@@ -1098,21 +1184,29 @@ async function renderSet(body) {
   body.querySelectorAll('[data-parbranch]').forEach(btn => btn.addEventListener('click', () => { S.parBranch = btn.dataset.parbranch; renderSet(body); }));
   body.querySelectorAll('input[data-par]').forEach(inp => inp.addEventListener('change', async () => {
     const v = readSetting(inp); if (v === null) return;
+    if (v < 0 || !Number.isInteger(v)) { toast('ระดับสต๊อกต้องเป็นจำนวนเต็มตั้งแต่ 0'); inp.value=inp.dataset.prev; return; }
     await supabase.from('stock_par_levels').upsert({ item_id: +inp.dataset.par, branch_id: inp.dataset.parb, par_qty: v }, { onConflict: 'item_id,branch_id' });
     toast('บันทึกแล้ว');
   }));
   body.querySelectorAll('input[data-branchprice]').forEach(inp => inp.addEventListener('change', async () => {
     const v = readSetting(inp); if (v === null) return;
-    await supabase.from('stock_items').update({ branch_price: v }).eq('id', +inp.dataset.branchprice);
-    toast('บันทึกราคาส่งสาขาใหม่แล้ว — มีผลทันทีทั้งระบบ');
+    if (v < 0) { toast('ราคาติดลบไม่ได้'); return; }
+    const {error}=await supabase.from('stock_items').update({ branch_price: v }).eq('id', +inp.dataset.branchprice);
+    if(error){toast('บันทึกราคาไม่สำเร็จ: '+error.message);return;}
+    const it=STOCK_ITEMS.find(x=>x.id===+inp.dataset.branchprice);if(it)it.branch_price=v;
+    invalidateRefs();
+    toast('บันทึกราคาใหม่แล้ว — ใช้อัตโนมัติกับรายการใหม่ ส่วนรายการเก่าใช้ราคาเดิม');
   }));
   body.querySelectorAll('input[data-settingkey]').forEach(inp => inp.addEventListener('change', async () => {
     let v; try { v = JSON.parse(inp.value); } catch { toast('กรอกค่าไม่ถูกต้อง (ใส่ตัวเลขหรือ true/false เท่านั้น)'); return; }
-    await supabase.from('settings').upsert({ key: inp.dataset.settingkey, value: v, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-    toast('บันทึกแล้ว — มีผลตอนโหลดหน้าใหม่ (ล็อกอินใหม่/รีเฟรช)');
+    if((inp.dataset.settingkey==='grab_commission_pct'&&(v<0||v>1))||v<0){toast('ค่านี้ติดลบไม่ได้ และค่าคอมต้องอยู่ระหว่าง 0 ถึง 1');return;}
+    const {error}=await supabase.from('settings').upsert({ key: inp.dataset.settingkey, value: v, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}invalidateSettings();await loadSettings();monthPayrollCache=null;
+    toast('บันทึกแล้ว — รายการใหม่ใช้ค่าใหม่อัตโนมัติ รายการเก่าไม่เปลี่ยน');
   }));
   body.querySelectorAll('input[data-structuredkey]').forEach(inp => inp.addEventListener('change', async () => {
     const v = readSetting(inp); if (v === null) return;
+    if(v<0){toast('ค่าติดลบไม่ได้');return;}
     const key = inp.dataset.structuredkey;
     const oldValue = structuredValues[key];
     const nextValue = Array.isArray(oldValue) ? [...oldValue] : { ...oldValue };
@@ -1120,8 +1214,8 @@ async function renderSet(body) {
     const { error } = await supabase.from('settings').upsert(
       { key, value: nextValue, updated_at: new Date().toISOString() }, { onConflict: 'key' });
     if (error) { inp.value = inp.dataset.prev; toast('บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง'); return; }
-    structuredValues[key] = nextValue;
+    structuredValues[key] = nextValue; invalidateSettings(); await loadSettings(); monthPayrollCache=null;
     inp.dataset.prev = String(v);
-    toast('บันทึกแล้ว — มีผลตอนโหลดหน้าใหม่ (ล็อกอินใหม่/รีเฟรช)');
+    toast('บันทึกแล้ว — รายการใหม่ใช้ค่าใหม่อัตโนมัติ รายการเก่าไม่เปลี่ยน');
   }));
 }

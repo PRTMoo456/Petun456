@@ -3,7 +3,7 @@
 -- แปลงจากต้นแบบ (nomicha.html, ข้อมูลในหน่วยความจำ `db`) ตามสเปกฉบับ 43
 -- อ้างอิง: claude/concept-spec.md ในโปรเจกต์ "สรุปยอดสาขา"
 -- ==============================================================
--- วิธีใช้: วางทั้งไฟล์นี้ใน Supabase Dashboard → SQL Editor → Run
+-- วิธีใช้โปรเจกต์ใหม่: รันไฟล์นี้ → seed_reference_data.sql → migrations/006_simplify_harden_and_snapshot.sql
 -- รันครั้งเดียวตอนตั้งโปรเจกต์ใหม่ (ไฟล์นี้ไม่ seed ข้อมูลสมมุติใด ๆ — สต๊อก/ยอดขายทุกอย่างเริ่มที่ 0
 --  ตามหลักการที่เจ้าของยืนยันไว้ในข้อ 22.3 ของสเปก: "ระบบจริงต้องเริ่มจากไฟล์ว่างเปล่า")
 -- ==============================================================
@@ -14,9 +14,7 @@ create extension if not exists "pgcrypto"; -- สำหรับ gen_random_uuid
 -- 0. บทบาทผู้ใช้ (enum)
 -- ------------------------------------------------------------
 create type user_role as enum ('staff', 'relief', 'owner');
-create type advance_type as enum ('advance', 'loan');   -- เบิก / กู้
-create type advance_source as enum ('request', 'remit'); -- ขอผ่านปุ่ม / เก็บเงินสดร้านไว้แทนส่ง
-create type remit_method as enum ('cash', 'transfer', 'loan');
+create type remit_method as enum ('cash', 'transfer');
 create type recount_status as enum ('pending', 'approved', 'rejected');
 
 -- ------------------------------------------------------------
@@ -54,6 +52,7 @@ create table branches (
   work_start      time not null default '08:00',
   work_end        time not null default '18:00',
   late_grace_min  int  not null default 0,         -- ผ่อนผันมาสายกี่นาทีถึงจะเริ่มนับ (0 = นับตั้งแต่นาทีแรก)
+  cash_tracking_from date not null default (now() at time zone 'Asia/Bangkok')::date,
   active          boolean not null default true    -- false = ปิดสาขาแล้ว (เช่นบ้านแพง) แต่เก็บประวัติไว้ ไม่ลบทิ้ง
 );
 comment on column branches.work_start is 'เวลาเข้างานตามเวลาไทย — ลงเวลาเข้าช้ากว่านี้ (เกิน late_grace_min) นับเป็นนาทีสาย หักนาทีละ 1 บาท และมีผลกับเบี้ยขยัน';
@@ -172,6 +171,8 @@ create table daily_records (
   branch_id     text not null references branches(id),
   record_date   date not null,
   staff_name    text not null,          -- ชื่อคนขายจริงวันนั้น (อาจเป็นหัวหน้าไปแทน)
+  open_yen      int not null default 0, -- แก้วตั้งต้นของวันนั้น เก็บไว้กับรายการเพื่อไม่ให้ราคา/การแก้ภายหลังเพี้ยน
+  open_pan      int not null default 0,
   yen           int not null default 0,   -- แก้วเย็นคงเหลือปลายวัน
   yen_add       int not null default 0,   -- แก้วเย็นที่เติมระหว่างวัน (1 แถว=50)
   pan           int not null default 0,   -- แก้วปั่นคงเหลือปลายวัน
@@ -187,6 +188,9 @@ create table daily_records (
   grab          numeric not null default 0,   -- ยอดเต็มที่ลูกค้าจ่ายผ่านแกร๊บ (หักค่าคอมตอนคำนวณ ไม่ใช่ตอนกรอก)
   thaichaithai  numeric not null default 0,
   float_cash    numeric not null,             -- เงินทอนตั้งต้นที่ "ใช้จริงวันนั้น" (snapshot ไม่ใช้ค่าปัจจุบันของสาขา)
+  cup_price_yen numeric not null default 25,
+  cup_price_pan numeric not null default 35,
+  grab_commission_pct numeric not null default 0.321,
   stock_snapshot jsonb not null default '{}', -- {item_id: qty} ยอดคงเหลือปลายวันของวัตถุดิบ
   sent          boolean not null default false,
   closed        boolean not null default false,
@@ -195,17 +199,19 @@ create table daily_records (
   leave_quota_days int not null default 0 check (leave_quota_days between 0 and 2),
   created_by    uuid references employees(id),
   created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
   unique (branch_id, record_date)
 );
 comment on column daily_records.stock_snapshot is 'เก็บเป็น JSONB เพราะอ่าน/เขียนทั้งก้อนต่อวันเสมอ ไม่เคย query แยกรายวัตถุดิบข้ามวัน (ต่างจาก warehouse_stock ที่ query แยกรายชิ้นบ่อย)';
 
 create table record_edit_history (      -- ประวัติที่เจ้าของแก้ยอดย้อนหลัง (db.edits เดิม)
   id            uuid primary key default gen_random_uuid(),
-  record_id     uuid not null references daily_records(id),
+  record_id     uuid not null,
   field         text not null,
   from_value    text,
   to_value      text,
   label         text not null,
+  reason        text,
   edited_by     uuid references employees(id),
   edited_at     timestamptz not null default now()
 );
@@ -259,42 +265,24 @@ create table relief_day_offs (      -- วันหยุดของหัว�
 );
 
 -- ------------------------------------------------------------
--- 9. เบิกเงิน/เงินกู้ + เงินสด
+-- 9. การส่งเงินสด
 -- ------------------------------------------------------------
-create table advances (
-  id            uuid primary key default gen_random_uuid(),
-  -- branch_id เป็น null ได้ — ใช้กับเงินเบิก/เงินกู้ของหัวหน้าเอง (ไม่ผูกกับสาขาเดียว ต่างจากพนักงานสาขา)
-  branch_id     text references branches(id),
-  staff_name    text not null,
-  request_date  date not null,
-  amount        numeric not null,
-  type          advance_type not null,
-  interest      numeric not null default 0,
-  total         numeric not null,          -- amount + interest
-  due_date      date not null,             -- วันที่ 5 หรือ 20 ถัดไปที่ใกล้ที่สุด — ครบกำหนดแล้วถือว่าหักคืนอัตโนมัติ (ดู isSettled ในต้นแบบ)
-  source        advance_source not null default 'request',
-  repaid        boolean not null default false,
-  created_at    timestamptz not null default now()
-);
-
 create table cash_remittances (      -- เงินสดสาขา → หัวหน้า
   id            uuid primary key default gen_random_uuid(),
   branch_id     text not null references branches(id),
   remit_date    date not null,
   amount        numeric not null,
-  method        remit_method not null default 'cash'
-);
-
-create table remit_loan_offsets (    -- ยอดเงินสดที่พนักงานเลือกเก็บไว้เป็นเงินกู้แทนส่งจริง (หักจากยอดที่ต้องส่ง)
-  branch_id     text primary key references branches(id),
-  amount        numeric not null default 0
+  method        remit_method not null default 'cash',
+  through_record_date date,
+  created_at    timestamptz not null default now()
 );
 
 create table head_remittances (      -- หัวหน้า → เจ้าของ (เงินสด/โอน)
   id            uuid primary key default gen_random_uuid(),
   remit_date    date not null,
   amount        numeric not null,
-  method        remit_method not null default 'cash'
+  method        remit_method not null default 'cash',
+  created_at    timestamptz not null default now()
 );
 
 -- ------------------------------------------------------------
@@ -306,6 +294,8 @@ create table deliveries (           -- ใบส่งของ คลังก�
   branch_id     text not null references branches(id),
   round_id      text references delivery_rounds(id),
   items         jsonb not null,          -- {item_id: qty_sent}
+  price_snapshot jsonb not null default '{}', -- ราคาส่งสาขาที่ใช้จริง ณ ตอนยืนยันส่ง
+  cost_snapshot jsonb not null default '{}',  -- ต้นทุนคลังที่ใช้จริง ณ ตอนยืนยันส่ง
   received      jsonb,                   -- {item_id: qty_received} — null จนกว่าสาขาจะเช็ครับ
   packed_by     uuid references employees(id),
   received_at   timestamptz,
@@ -342,15 +332,10 @@ create table settings (
   value         jsonb not null,
   updated_at    timestamptz not null default now()
 );
-comment on table settings is 'เก็บค่าคงที่ทางธุรกิจที่เจ้าของแก้ได้เอง เช่น grab_commission_pct, advance_cap, loan_cap, loan_interest_pct, cup_price, diligence_rules, holiday_pay_scale';
+comment on table settings is 'เก็บค่าคงที่ทางธุรกิจที่เจ้าของแก้ได้เอง เช่น grab_commission_pct, cup_price, diligence_rules, holiday_pay_scale';
 
 insert into settings (key, value) values
   ('grab_commission_pct', '0.321'),
-  ('advance_cap',         '4000'),
-  ('loan_cap',            '2000'),
-  ('loan_interest_pct',   '0.10'),
-  ('advance_day',         '20'),
-  ('settle_days',         '[5,20]'),
   ('cup_price',           '{"yen":25,"pan":35}'),
   ('cups_per_row',        '{"yen":50,"pan":25}'),
   ('diligence_rules',     '{"step":500,"cap":1500,"lateAllowance":250}'),
@@ -382,6 +367,8 @@ create or replace function relief_name() returns text
 language sql stable security definer set search_path = public as $$
   select name from employees where role='relief' and active order by name limit 1;
 $$;
+revoke all on function relief_name() from public;
+grant execute on function relief_name() to authenticated;
 
 alter table employees enable row level security;
 alter table employee_private enable row level security;
@@ -391,9 +378,7 @@ alter table record_edit_history enable row level security;
 alter table recount_requests enable row level security;
 alter table day_offs enable row level security;
 alter table relief_day_offs enable row level security;
-alter table advances enable row level security;
 alter table cash_remittances enable row level security;
-alter table remit_loan_offsets enable row level security;
 alter table head_remittances enable row level security;
 alter table deliveries enable row level security;
 alter table external_sales enable row level security;
@@ -435,16 +420,9 @@ create policy delete_day_offs on day_offs for delete using (auth_role() in ('rel
 create policy read_relief_day_offs on relief_day_offs for select using (true);
 create policy write_relief_day_offs on relief_day_offs for insert with check (auth_role() in ('relief','owner'));
 create policy delete_relief_day_offs on relief_day_offs for delete using (auth_role() in ('relief','owner'));
-create policy advances_policy on advances for all
-  using (auth_role() in ('relief','owner') or branch_id = auth_branch())
-  with check (auth_role() in ('relief','owner') or branch_id = auth_branch());
 -- เงินสดที่ส่ง: พนักงานบันทึก "ส่งเงินสดแล้ว" ของสาขาตัวเองได้เอง (ดู doRemit ในต้นแบบ) หัวหน้า/เจ้าของบันทึกแทนสาขาไหนก็ได้ (doRemitBranch)
 create policy read_remit on cash_remittances for select using (auth_role() in ('relief','owner') or branch_id = auth_branch());
 create policy write_remit on cash_remittances for insert
-  with check (auth_role() in ('relief','owner') or branch_id = auth_branch());
--- ยอดที่พนักงานเลือกเก็บไว้เป็นเงินกู้แทนส่งจริง (remit_loan_offsets) เป็นการกระทำของพนักงานเอง จึงแก้ของสาขาตัวเองได้ด้วย
-create policy remit_offset_policy on remit_loan_offsets for all
-  using (auth_role() in ('relief','owner') or branch_id = auth_branch())
   with check (auth_role() in ('relief','owner') or branch_id = auth_branch());
 create policy head_remit_policy on head_remittances for all using (auth_role() in ('relief','owner')) with check (auth_role() in ('relief','owner'));
 create policy deliveries_policy on deliveries for all

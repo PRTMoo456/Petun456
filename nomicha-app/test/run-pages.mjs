@@ -158,7 +158,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
     const pr = calc.payrollFor({
       branch: { relief_name: 'ขวัญ', base_salary: emp.base_salary, days_off_quota: b.days_off_quota, holiday_work_days: b.holiday_work_days },
       records, clocksByDate: clocksByDateAll[b.id], allDatesInMonth: dates,
-      advancesForStaff: db.advances.filter(a => a.branch_id === b.id), todayISO: TODAY, cfg,
+      todayISO: TODAY, cfg,
     });
     const x = calc.branchPL({ sales, grab, materialCost, rent: 3500, repairs: db.repairs.filter(r => r.branch_id === b.id), grabCommissionPct: cfg.grabCommissionPct, payroll: pr });
     check(`กำไรสาขา ${b.name} เป็นตัวเลข`, Number.isFinite(x.net), `net = ${x.net}`);
@@ -176,14 +176,14 @@ if (ownerHTML.pay && ownerHTML.pl) {
   const prR = calc.payrollForRelief({
     relief: { name: 'ขวัญ', base_salary: 9000, delivery_pay: 5000 },
     allBranchRecords: db.daily_records, allBranchClocksByDate: clocksByDateAll,
-    advancesForRelief: db.advances.filter(a => a.branch_id == null && a.staff_name === 'ขวัญ'), todayISO: TODAY, cfg, whRent: 2000,
+    todayISO: TODAY, cfg, whRent: 2000,
   });
   check('ค่าแก้วหัวหน้า', prR.cups > 0, `หัวหน้าไปทำแทน 1 วันแต่ได้ค่าแก้ว ${prR.cups} ใบ`);
   const emp = db.employees.find(e => e.id === 'u-lnd');
   const pr = calc.payrollFor({
     branch: { relief_name: 'ขวัญ', base_salary: emp.base_salary, days_off_quota: 2, holiday_work_days: 1 },
     records: db.daily_records.filter(r => r.branch_id === 'lnd'), clocksByDate: clocksByDateAll.lnd, allDatesInMonth: dates,
-    advancesForStaff: db.advances.filter(a => a.branch_id === 'lnd'), todayISO: TODAY, cfg,
+    todayISO: TODAY, cfg,
   });
   const reliefRec = db.daily_records.find(r => r.branch_id === 'lnd' && r.staff_name === 'ขวัญ');
   const reliefCups = calc.calcDay(reliefRec, clocksByDateAll.lnd[reliefRec.record_date], cfg).cups;
@@ -197,16 +197,6 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log(`✓ ค่าแก้ววันที่หัวหน้าไปทำแทน (${reliefCups} ใบ) เข้าเงินเดือนหัวหน้า ไม่ใช่ของพนักงานประจำสาขา`);
 }
 
-// 4.4 วันครบกำหนดหักเงินกู้ ต้องตรงกับวันที่ 5/20 จริง (จับบั๊กเขตเวลา)
-{
-  for (const day of ['2026-09-01', '2026-09-06', '2026-09-21', '2026-12-31']) {
-    const due = calc.nextSettleDate(day, cfg.settleDays);
-    const dd = Number(due.slice(8, 10));
-    check('วันครบกำหนดหักคืน', cfg.settleDays.includes(dd), `ขอเบิกวันที่ ${day} → ครบกำหนด ${due} (วันที่ ${dd} ไม่ใช่วันที่ 5 หรือ 20)`);
-  }
-  console.log('✓ วันครบกำหนดหักเงินเบิก/เงินกู้ ตรงวันที่ 5/20 จริงทุกกรณี');
-}
-
 // 4.5 ปฏิทินจองวันหยุด ต้องเริ่มที่ "พรุ่งนี้" และไม่มีวันซ้ำ
 {
   const { futureDates } = await import('../src/dayoff.js');
@@ -217,41 +207,14 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log('✓ ปฏิทินจองวันหยุด — เริ่มพรุ่งนี้ ครบ 31 วัน ไม่มีวันซ้ำ/ขาด');
 }
 
-// 4.6 เงินสดค้างส่ง = ผลรวม (เงินสด − เงินทอน) ของวันที่ยังไม่ได้ส่ง ลบยอดที่ขอเก็บไว้เป็นเงินกู้
+// 4.6 เงินสดค้างส่ง = ผลรวม (เงินสด − เงินทอน) ของวันที่ยังไม่ได้ส่ง
 {
   const recs = db.daily_records.filter(r => r.branch_id === 'lnd' && r.sent);
   const lastRemit = db.cash_remittances.filter(r => r.branch_id === 'lnd').sort((a, b) => b.remit_date < a.remit_date ? -1 : 1)[0];
-  const p = calc.cashPending(recs, lastRemit.remit_date, 0);
+  const p = calc.cashPending(recs, lastRemit.remit_date);
   const manual = recs.filter(r => r.record_date > lastRemit.remit_date).reduce((s, r) => s + Math.max(0, r.cash - r.float_cash), 0);
   check('ยอดเงินสดค้างส่ง', Math.round(p.amount) === Math.round(manual), `ระบบคิด ${p.amount} แต่คำนวณมือได้ ${manual}`);
-  const withOffset = calc.cashPending(recs, lastRemit.remit_date, 500);
-  check('หักยอดที่เก็บไว้เป็นเงินกู้', Math.round(withOffset.amount) === Math.round(manual - 500), `หัก 500 แล้วได้ ${withOffset.amount} ควรเป็น ${manual - 500}`);
-  console.log(`✓ เงินสดค้างส่ง ${Math.round(p.amount).toLocaleString('th-TH')} บาท ตรงกับผลรวมรายวัน และหักยอดที่เก็บไว้เป็นเงินกู้ถูกต้อง`);
-}
-
-
-// 4.7 เก็บเงินสดไว้เป็นเงินกู้แทนการส่ง — ยอดที่เคยเก็บไว้ต้องบวกสะสม ไม่ใช่ถูกล้างทิ้ง
-{
-  db.remit_loan_offsets.find(o => o.branch_id === 'lnd').amount = 300;   // เคยเก็บไว้แล้ว 300
-  db.daily_records.push({ id: 'r-lnd-x', branch_id: 'lnd', record_date: TODAY, staff_name: 'ตาล', yen: 18, yen_add: 0, pan: 9, pan_add: 0,
-    cup_own: 0, topping: 0, other: 0, ice: 0, water: 0, etc: 0, cash: 2000, transfer: 0, grab: 0, thaichaithai: 0,
-    float_cash: 300, stock_snapshot: { 0: 0, 1: 0, 2: 3, 3: 6 }, sent: true, closed: true, created_by: 'u-lnd' });
-  root.innerHTML = '<div id="roleRoot"></div>';
-  const staff2 = await import('../src/pages/staff.js?v=2');
-  await staff2.renderStaffApp(document.getElementById('roleRoot'), db.employees.find(e => e.id === 'u-lnd'));
-  await new Promise(r => setTimeout(r, 150));
-  const toggle = document.querySelector('#loanRemitToggleBtn');
-  if (!toggle) warns.push('วันนี้ไม่ใช่วันส่งของ จึงข้ามการทดสอบ "เก็บเงินสดไว้เป็นเงินกู้" (ปุ่มขึ้นเฉพาะวันรอบส่งของ)');
-  else {
-    toggle.click(); await new Promise(r => setTimeout(r, 120));
-    const amtEl = document.querySelector('#loanRemitAmt');
-    amtEl.value = '200'; amtEl.dispatchEvent(new dom.window.Event('input'));
-    document.querySelector('#loanRemitConfirmBtn').click();
-    await new Promise(r => setTimeout(r, 150));
-    const off = db.remit_loan_offsets.find(o => o.branch_id === 'lnd');
-    check('ยอดเก็บไว้เป็นเงินกู้บวกสะสม', Number(off.amount) === 500, `เดิม 300 + ใหม่ 200 ควรได้ 500 แต่ได้ ${off.amount}`);
-    console.log('✓ เก็บเงินสดไว้เป็นเงินกู้ — บวกสะสมทับของเดิมถูกต้อง (300 + 200 = 500)');
-  }
+  console.log(`✓ เงินสดค้างส่ง ${Math.round(p.amount).toLocaleString('th-TH')} บาท ตรงกับผลรวมรายวัน`);
 }
 
 // 4.8 หัวหน้าไปแทนสาขาแล้วปิดยอด — "แถวแก้ว" ในสต๊อกต้องคิดจากยอดที่นับวันนี้ ไม่ใช่ลอกของเมื่อวานมาทั้งก้อน
@@ -263,6 +226,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
     draft: { yen: 120, yenAdd: 0, pan: 60, panAdd: 0, cupOwn: 0, topping: 0, other: 0, ice: 0, water: 0, etc: 0,
              cash: 900, transfer: 0, grab: 0, thaichaithai: 0, float: 300 },
     cfg, stockItems: db.stock_items, prevSnapshot: { 0: 9, 1: 9, 2: 5, 3: 7 }, createdBy: 'u-rel',
+    openYen: 150, openPan: 75,
   });
   const rec = db.daily_records[db.daily_records.length - 1];
   check('บันทึกยอดของหัวหน้า', db.daily_records.length === before + 1, 'ไม่มีแถวใหม่');
@@ -271,6 +235,24 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('วัตถุดิบอื่นใช้ของเมื่อวาน', rec.stock_snapshot[2] === 5 && rec.stock_snapshot[3] === 7,
     `วันไปแทนไม่ได้นับสต๊อก ต้องคงยอดเมื่อวานไว้ แต่ได้ ${rec.stock_snapshot[2]}/${rec.stock_snapshot[3]}`);
   console.log('✓ หัวหน้าปิดยอดแทนสาขา — แถวแก้วคิดจากที่นับวันนี้ วัตถุดิบอื่นคงยอดเมื่อวาน');
+}
+
+// 4.8b ราคาและต้นทุนใหม่ต้องไม่ย้อนเปลี่ยนรายการเก่า
+{
+  const oldDay = { open_yen: 100, open_pan: 50, yen: 90, pan: 45, yen_add: 0, pan_add: 0,
+    cup_price_yen: 25, cup_price_pan: 35, grab_commission_pct: 0.321,
+    cup_own: 0, topping: 0, other: 0, ice: 0, water: 0, etc: 0,
+    float_cash: 300, cash: 300, transfer: 0, grab: 100, thaichaithai: 0 };
+  const c = calc.calcDay(oldDay, null, { ...cfg, cupPrice: { yen: 99, pan: 99 }, grabCommissionPct: 0.5 });
+  check('ยอดวันเก่าใช้ราคา snapshot', c.income === 425, `ควรได้ 425 แต่ได้ ${c.income}`);
+  check('ค่าคอมวันเก่าใช้ snapshot', Math.abs(c.grabCommission - 32.1) < 0.001, `ควรได้ 32.10 แต่ได้ ${c.grabCommission}`);
+  const itemMap = { 2: { branch_price: 999 } };
+  const delivery = [{ items: { 2: 2 }, price_snapshot: { 2: 120 }, cost_snapshot: { 2: 80 } }];
+  check('ใบส่งของเก่าใช้ราคา snapshot', calc.monthMaterialCost(delivery, itemMap) === 240, 'ราคาใบส่งของเก่าถูกเปลี่ยนตามราคาปัจจุบัน');
+  const wh = calc.warehousePL({ deliveries: delivery, externalSales: [], stockItemsById: itemMap,
+    avgCostById: { 2: 500 }, reliefPayroll: { total: 0 } });
+  check('กำไรคลังเก่าใช้ต้นทุน snapshot', wh.cost === 160, `ควรใช้ต้นทุนเก่า 160 แต่ได้ ${wh.cost}`);
+  console.log('✓ ราคา/ค่าคอม/ต้นทุน — รายการเก่าใช้ snapshot แม้ตั้งค่าใหม่แล้ว');
 }
 
 // 4.9 เงินทอนตั้งต้นของวันถัดไป ต้องใช้ค่าที่กรอกไว้ครั้งล่าสุด (ต้นแบบเก็บทับลง b.float หลังส่งยอด)
@@ -305,8 +287,8 @@ if (ownerHTML.pay && ownerHTML.pl) {
   const m = html.match(/เงินเดือนฐาน<\/span><span class="n">([\d,]+)</);
   check('เงินเดือนฐานในหน้าของพนักงาน', m && Number(m[1].replace(/,/g, '')) === 9000,
     `หน้า "ของฉัน" โชว์เงินเดือนฐาน ${m ? m[1] : '(อ่านไม่ได้)'} ควรเป็น 9,000 ตามที่ตั้งไว้ในตาราง employees`);
-  check('มีการ์ดแจงยอดหัก', /เงินที่จะได้รับ/.test(html), 'ไม่มีการ์ด "เงินที่จะได้รับ" ที่แจงว่าหักจากอะไรบ้าง');
-  console.log('✓ หน้า "ของฉัน" — เงินเดือนฐานตรงกับตาราง employees และแจงยอดหักครบ 3 ก้อน');
+  check('มีเงินเดือนสุทธิ', /ยอดสุทธิโดยประมาณ/.test(html), 'ไม่มีสรุปเงินเดือนสุทธิ');
+  console.log('✓ หน้า "ของฉัน" — เงินเดือนฐานตรงกับตาราง employees และมีสรุปยอดสุทธิ');
 }
 
 // 4.12 หัวหน้าไปแทนสาขา — ต้องนับแก้วก่อนขายให้เสร็จก่อน ถึงจะเปิดฟอร์มปิดยอดได้
@@ -338,17 +320,14 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log('✓ ช่องกรอกตัวเลข — "1,250" ได้ 1250 · พิมพ์ผิดในช่องตั้งค่าคงค่าเดิมไว้ ไม่กลายเป็น 0');
 }
 
-// 4.14 ยอดเงินสดค้างส่งที่เจ้าของเห็น ต้องเท่ากับที่พนักงานเห็น (หักยอดที่เก็บไว้เป็นเงินกู้เหมือนกัน)
+// 4.14 ยอดเงินสดค้างส่งที่เจ้าของเห็น ต้องเท่ากับที่พนักงานเห็น
 {
   const recs = db.daily_records.filter(r => r.branch_id === 'lnd' && r.sent);
   const lastRemit = db.cash_remittances.filter(r => r.branch_id === 'lnd').sort((a, b) => b.remit_date < a.remit_date ? -1 : 1)[0];
-  const offset = db.remit_loan_offsets.find(o => o.branch_id === 'lnd');
-  const staffView = calc.cashPending(recs, lastRemit.remit_date, Number(offset.amount));
-  const ownerView = calc.cashPending(recs, lastRemit.remit_date, Number(offset.amount));
+  const staffView = calc.cashPending(recs, lastRemit.remit_date);
+  const ownerView = calc.cashPending(recs, lastRemit.remit_date);
   check('ยอดค้างส่งสองฝั่งตรงกัน', staffView.amount === ownerView.amount, `พนักงานเห็น ${staffView.amount} เจ้าของเห็น ${ownerView.amount}`);
-  check('offset ถูกหักจริง', Number(offset.amount) === 0 || staffView.amount < calc.cashPending(recs, lastRemit.remit_date, 0).amount,
-    'ยอดที่เก็บไว้เป็นเงินกู้ไม่ถูกหักออกจากยอดค้างส่ง');
-  console.log('✓ ยอดเงินสดค้างส่ง — พนักงาน/หัวหน้า/เจ้าของ ใช้สูตรและตัวหักชุดเดียวกัน');
+  console.log('✓ ยอดเงินสดค้างส่ง — พนักงาน/หัวหน้า/เจ้าของ ใช้สูตรชุดเดียวกัน');
 }
 
 
@@ -433,7 +412,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
   };
   const base = { staff_name: 'ทดสอบ', base_salary: 9000, days_off_quota: 31, holiday_work_days: 0 };
   const mk = lateMin => calc.payrollFor({ branch: base, records: [], clocksByDate: mkClocks(lateMin),
-    allDatesInMonth: dates, advancesForStaff: [], todayISO: TODAY, cfg });
+    allDatesInMonth: dates, todayISO: TODAY, cfg });
   const ok = mk(0), late30 = mk(30), late300 = mk(300);
   check('ไม่สาย ได้เบี้ยขยันเต็ม', ok.diligence === cfg.diligenceRules.cap && ok.deduct === 0,
     `เบี้ยขยัน ${ok.diligence} หัก ${ok.deduct}`);
@@ -463,7 +442,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
     const o = {}; clockRows.forEach(c => { o[c.clock_date] = { staff_name: 'ทดสอบ', open_yen: 10, open_pan: 5, ...c }; });
     return calc.payrollFor({
       branch: { staff_name: 'ทดสอบ', base_salary: 9000, days_off_quota: 31, holiday_work_days: 0 },
-      records: [], clocksByDate: o, allDatesInMonth: dates, advancesForStaff: [], todayISO: TODAY, cfg,
+      records: [], clocksByDate: o, allDatesInMonth: dates, todayISO: TODAY, cfg,
     });
   };
   const full = { clock_date: dates[0], time_in: '08:00', time_out: '18:00' };
@@ -487,7 +466,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
   const soldNoClock = calc.payrollFor({
     branch: { staff_name: 'ทดสอบ', base_salary: 9000, days_off_quota: 31, holiday_work_days: 0 },
     records: [{ record_date: dates[0], staff_name: 'ทดสอบ', sent: true, yen: 0, pan: 0, cash: 0, float_cash: 0 }],
-    clocksByDate: {}, allDatesInMonth: dates, advancesForStaff: [], todayISO: TODAY, cfg,
+    clocksByDate: {}, allDatesInMonth: dates, todayISO: TODAY, cfg,
   });
   check('ขายแต่ไม่ลงเวลาเลย หัก 40', soldNoClock.deduct === 40, `หัก ${soldNoClock.deduct} บาท`);
   console.log('✓ ลืมลงเวลา — หัก 40 บาท/ครั้ง ทั้งกรณีลืมเข้า/ลืมออก/ไม่ลงเลย · วันนี้ยังไม่นับ (ยังลงออกได้อยู่)');
@@ -500,7 +479,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
     clockRows.forEach(c => { byBranch.lnd[c.clock_date] = { staff_name: 'ขวัญ', open_yen: 10, open_pan: 5, ...c }; });
     return calc.payrollForRelief({
       relief: { name: 'ขวัญ', base_salary: 9000, delivery_pay: 5000 },
-      allBranchRecords: [], allBranchClocksByDate: byBranch, advancesForRelief: [], todayISO: TODAY, cfg, whRent: 2000,
+      allBranchRecords: [], allBranchClocksByDate: byBranch, todayISO: TODAY, cfg, whRent: 2000,
     });
   };
   const veryLate = mkR([{ clock_date: dates[0], time_in: '11:30', time_out: '15:00', late_minutes: 210, early_minutes: 180 }]);
@@ -574,7 +553,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
 {
   const mkPay = payRules => calc.payrollFor({
     branch: { staff_name: 'ท', base_salary: 9000, days_off_quota: 31, holiday_work_days: 0 },
-    records: [], allDatesInMonth: dates, advancesForStaff: [], todayISO: TODAY,
+    records: [], allDatesInMonth: dates, todayISO: TODAY,
     clocksByDate: { [dates[0]]: { staff_name: 'ท', clock_date: dates[0], time_in: '08:00', time_out: '18:00', late_minutes: 10, early_minutes: 0 } },
     cfg: { ...cfg, payRules },
   });
@@ -674,7 +653,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
 {
   const print = await import('../src/print.js');
   const companies = await print.getCompanies();
-  const pr = { cups: 100, cupPay: 100, diligence: 1500, holidayPay: 0, deduct: 40, advanceDeduct: 0, reset: false, noClock: 1, whRent: 2000, total: 10560 };
+  const pr = { cups: 100, cupPay: 100, diligence: 1500, holidayPay: 0, deduct: 40, reset: false, noClock: 1, whRent: 2000, total: 10560 };
   const emp = db.employees.find(e => e.id === 'u-lnd');
   const nid = db.employee_private.find(x => x.employee_id === 'u-lnd').national_id;
   const slip = print.staffSlipHTML({ name: 'เหล่านาดี', staff_name: emp.name, first_name: emp.first_name, last_name: emp.last_name,

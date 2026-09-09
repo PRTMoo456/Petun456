@@ -12,6 +12,7 @@ import { whAvailMap, issueExternalSale } from '../warehouse.js';
 import * as calc from '../calc.js';
 
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
+let tabLoadTicket = 0;
 let S = {
   tab: 'sched', round: null, packOpen: {}, whDraft: {}, whDraftLoose: {},
   extOpen: false, extBuyer: '', extDraft: {}, extViewing: null,
@@ -28,6 +29,8 @@ export async function renderReliefApp(root, me) {
 }
 
 async function draw(root) {
+  const liveToday = todayISO();
+  if (TODAY !== liveToday) { TODAY = liveToday; S.reliefDraft = null; S.reliefErrors = {}; }
   root.innerHTML = `<div class="wrap phone" id="reliefRoot"><div class="boot">กำลังโหลด…</div></div>`;
   const box = $('#reliefRoot');
   const tabs = [['sched', 'ตารางงาน'], ['pack', 'รอบส่งของ'], ['ext', 'ขายนอก'], ['cash', 'ยอดส่งเงิน'], ['clock', 'ลงเวลา']];
@@ -49,11 +52,13 @@ async function draw(root) {
 
 async function loadTab() {
   const body = $('#reliefBody'); if (!body) return;
-  if (S.tab === 'sched') return renderSched(body);
-  if (S.tab === 'pack') return renderPack(body);
-  if (S.tab === 'ext') return renderExt(body);
-  if (S.tab === 'cash') return renderCash(body);
-  return renderClock(body);
+  const ticket=++tabLoadTicket,tab=S.tab;
+  if (tab === 'sched') await renderSched(body);
+  else if (tab === 'pack') await renderPack(body);
+  else if (tab === 'ext') await renderExt(body);
+  else if (tab === 'cash') await renderCash(body);
+  else await renderClock(body);
+  if(ticket!==tabLoadTicket)return loadTab();
 }
 
 function isRoundOn(dateISO) {
@@ -121,7 +126,7 @@ async function renderSched(body) {
   body.querySelectorAll('[data-relief-close]').forEach(btn => btn.addEventListener('click', async () => {
     const branchId = btn.dataset.reliefClose;
     const reason = body.querySelector(`[data-relief-close-reason="${branchId}"]`).value;
-    const result = await closeStore({ branchId, dateISO: TODAY, reason, createdBy: ME.id });
+    const result = await closeStore({ branchId, dateISO: TODAY, reason });
     if (result.error) { toast('บันทึกปิดร้านไม่สำเร็จ: ' + result.error); return; }
     toast(`บันทึกปิดร้านแล้ว — หักโควตาวันหยุด ${result.reason.quota} วัน`);
     renderSched(body);
@@ -204,7 +209,7 @@ async function renderPack(body) {
       </div>
     </div>
     ${branchCards}
-    <button class="btn primary big" id="packBtn">${packedAlready ? 'บันทึกรายการที่จัดใหม่อีกครั้ง' : 'จัดของครบแล้ว'}</button>
+    <button class="btn primary big" id="packBtn">${packedAlready ? 'ปรับรายการส่งและสต๊อก' : 'ยืนยันส่งของและตัดสต๊อก'}</button>
     <p class="foot">จำนวนคำนวณจากระดับที่ต้องมีต่อรอบที่เจ้าของตั้งไว้ ลบด้วยของที่เหลืออยู่จริงในสาขา (ยอดปิดล่าสุดที่สาขาส่งมา) · แตะชื่อสาขาเพื่อดู/ซ่อนรายการ</p>
   </div>`;
   wireRoundSelector(body);
@@ -217,16 +222,15 @@ function wireRoundSelector(body) {
 }
 
 async function doPackComplete(r, packDate, perBranch) {
-  const writes = [];
+  const btn = $('#packBtn'); if (btn) { btn.disabled = true; btn.textContent = 'กำลังตัดสต๊อกและบันทึก…'; }
   for (const x of perBranch) {
-    if (!x.items.length) { await supabase.from('deliveries').delete().eq('delivery_date', packDate).eq('branch_id', x.b.id); continue; }
     const items = {}; x.items.forEach(i => { items[i.it.id] = i.need; });
-    writes.push(supabase.from('deliveries').upsert({
-      delivery_date: packDate, branch_id: x.b.id, round_id: r.id, items, received: null, packed_by: ME.id,
-    }, { onConflict: 'branch_id,delivery_date,round_id' }));
+    const { error } = await supabase.rpc('confirm_delivery', {
+      p_delivery_date: packDate, p_branch_id: x.b.id, p_round_id: r.id, p_items: items,
+    });
+    if (error) { toast('ส่งของไม่สำเร็จ: ' + error.message); if (btn) { btn.disabled = false; btn.textContent = 'ยืนยันส่งของและตัดสต๊อก'; } return; }
   }
-  await Promise.all(writes);
-  toast('บันทึกว่าจัดของครบแล้ว — เก็บไว้ในประวัติการส่งของ ' + fmtDate(packDate));
+  toast('ยืนยันส่งของและตัดสต๊อกคลังแล้ว — ' + fmtDate(packDate));
   await draw($('#roleRoot'));
 }
 
@@ -271,19 +275,31 @@ async function renderWh(el) {
 }
 
 async function saveWhStock(stockById) {
-  const writes = [];
+  for (const it of STOCK_ITEMS) {
+    const values = [S.whDraft[it.id], S.whDraftLoose[it.id]];
+    if (values.some(raw => raw != null && raw !== '' && (N(raw) < 0 || !Number.isInteger(N(raw))))) {
+      toast(`${it.name}: จำนวนลังและชิ้นเศษต้องเป็นจำนวนเต็มตั้งแต่ 0`); return;
+    }
+  }
+  const counts = [];
   let updated = 0;
   STOCK_ITEMS.forEach(it => {
     const v = S.whDraft[it.id], vl = S.whDraftLoose[it.id];
     if ((v == null || v === '') && (vl == null || vl === '')) return;
-    const patch = { item_id: it.id, last_checked: TODAY,
-      avg_cost: stockById[it.id]?.avg_cost ?? 0 };
-    patch.case_qty = (v != null && v !== '') ? N(v) : (stockById[it.id]?.case_qty ?? 0);
-    patch.loose_qty = (vl != null && vl !== '') ? N(vl) : (stockById[it.id]?.loose_qty ?? 0);
-    writes.push(supabase.from('warehouse_stock').upsert(patch, { onConflict: 'item_id' }));
+    const row = {
+      item_id: it.id,
+      case_qty: (v != null && v !== '') ? N(v) : (stockById[it.id]?.case_qty ?? 0),
+      loose_qty: (vl != null && vl !== '') ? N(vl) : (stockById[it.id]?.loose_qty ?? 0),
+    };
+    if (row.case_qty < 0 || row.loose_qty < 0 || !Number.isInteger(row.case_qty) || !Number.isInteger(row.loose_qty)) return;
+    counts.push(row);
     updated++;
   });
-  await Promise.all(writes);
+  const btn=$('#whSaveBtn');if(btn){btn.disabled=true;btn.textContent='กำลังบันทึก…';}
+  if (counts.length) {
+    const { error } = await supabase.rpc('record_warehouse_count', { p_counts: counts });
+    if (error) { if(btn)btn.disabled=false;toast('บันทึกสต๊อกไม่สำเร็จ: ' + error.message); return; }
+  }
   S.whDraft = {}; S.whDraftLoose = {};
   toast(updated ? `บันทึกจำนวนที่นับได้ ${updated} รายการ` : 'บันทึกแล้ว');
   await draw($('#roleRoot'));
@@ -322,24 +338,14 @@ function refreshPurchPreview() {
 async function doSubmitPurchase() {
   const it = STOCK_ITEMS.find(x => x.id === purchState.itemId);
   const q = N(purchState.qty), p = N(purchState.price);
-  if (!it || q <= 0) { toast('กรอกจำนวนที่ซื้อให้ถูกต้อง'); return; }
+  if (!it || q <= 0 || !Number.isInteger(q)) { toast('จำนวนที่ซื้อต้องเป็นลังเต็มจำนวนตั้งแต่ 1 ขึ้นไป'); return; }
   if (p <= 0) { toast('กรอกราคารวมที่จ่ายให้ถูกต้อง'); return; }
-  const { data: cur } = await supabase.from('warehouse_stock').select('*').eq('item_id', it.id).maybeSingle();
-  const newUnits = q * it.per_case;
-  const newCostPerUnit = p / newUnits;
-  const existUnits = (cur?.case_qty ?? 0) * it.per_case + (cur?.loose_qty ?? 0);
-  const existCost = cur?.avg_cost ?? newCostPerUnit;
-  const totalUnits = existUnits + newUnits;
-  const newAvg = totalUnits > 0 ? ((existUnits * existCost) + (newUnits * newCostPerUnit)) / totalUnits : newCostPerUnit;
-  await supabase.from('warehouse_stock').upsert({
-    item_id: it.id, case_qty: (cur?.case_qty ?? 0) + q, loose_qty: cur?.loose_qty ?? 0,
-    avg_cost: +newAvg.toFixed(2), last_checked: cur?.last_checked ?? null,
-  }, { onConflict: 'item_id' });
-  await supabase.from('purchases').insert({
-    item_id: it.id, purchase_date: TODAY, case_qty: q, total_price: p,
-    cost_per_unit: +newCostPerUnit.toFixed(2), note: `บิลซื้อ${it.name} ${q} ลัง`, created_by: ME.id,
+  const sub = $('#purchSubmitBtn'); if (sub) { sub.disabled = true; sub.textContent = 'กำลังบันทึก…'; }
+  const { data, error } = await supabase.rpc('record_warehouse_purchase', {
+    p_item_id: it.id, p_case_qty: q, p_total_price: p, p_note: `บิลซื้อ${it.name} ${q} ลัง`,
   });
-  toast(`บันทึกบิล ${it.name} ${q} ลัง ${baht(p)} บาท เรียบร้อย — ต้นทุนเฉลี่ยใหม่ ${newAvg.toFixed(2)} บาท/${it.unit}`);
+  if (error) { toast('บันทึกบิลไม่สำเร็จ: ' + error.message); if (sub) { sub.disabled = false; sub.textContent = 'บันทึกบิลซื้อ'; } return; }
+  toast(`บันทึกบิล ${it.name} ${q} ลัง ${baht(p)} บาทแล้ว — ต้นทุนเฉลี่ยใหม่ ${Number(data?.avg_cost ?? 0).toFixed(2)} บาท/${it.unit}`);
   purchState = { open: false, itemId: STOCK_ITEMS[0]?.id, qty: '', price: '' };
   await draw($('#roleRoot'));
 }
@@ -350,7 +356,7 @@ async function renderExt(body) {
   body.innerHTML = `<div class="stack" id="extBox"><div class="boot">กำลังโหลด…</div></div>`;
   const avail = await whAvailMap(STOCK_ITEMS);
   const [{ data: sales }, { data: employees }] = await Promise.all([
-    supabase.from('external_sales').select('*').order('sale_date', { ascending: false }),
+    supabase.from('external_sales').select('*').order('sale_date', { ascending: false }).limit(100),
     supabase.from('employees').select('id,name'),
   ]);
   _extIssuerNames = {}; (employees || []).forEach(e => { _extIssuerNames[e.id] = e.name; });
@@ -433,8 +439,9 @@ function renderExtRefresh(box, avail, sales) {
 async function doSubmitExternalSale(avail) {
   const buyer = (S.extBuyer || '').trim();
   const lines = STOCK_ITEMS.map(it => ({ it, qty: N(S.extDraft[it.id]) })).filter(l => l.qty > 0);
+  const btn = $('#extSubmitBtn'); if (btn) { btn.disabled = true; btn.textContent = 'กำลังออกบิล…'; }
   const res = await issueExternalSale({ buyer, lines, issuerId: ME.id, stockItems: STOCK_ITEMS, avail });
-  if (res.error) { toast(res.error); return; }
+  if (res.error) { if (btn) btn.disabled = false; toast(res.error); return; }
   S.extOpen = false; S.extBuyer = ''; S.extDraft = {};
   toast(`ออกบิลให้ ${buyer} แล้ว ${baht(res.total)} บาท`);
   await draw($('#roleRoot'));
@@ -444,22 +451,23 @@ async function doSubmitExternalSale(avail) {
 async function renderCash(body) {
   body.innerHTML = `<div class="stack" id="cashBox"><div class="boot">กำลังโหลด…</div></div>`;
   const round = isRoundOn(TODAY);
-  const [{ data: allRemits }, { data: allOffsets }, { data: headRemits }] = await Promise.all([
+  const [{ data: allRemits }, { data: headRemits }] = await Promise.all([
     supabase.from('cash_remittances').select('*'),
-    supabase.from('remit_loan_offsets').select('*'),
     supabase.from('head_remittances').select('*'),
   ]);
   const list = await Promise.all(BRANCHES.map(async b => {
-    const branchRemits = (allRemits || []).filter(x => x.branch_id === b.id).sort((a, c) => a.remit_date < c.remit_date ? 1 : -1);
-    const lastRemitDate = branchRemits[0]?.remit_date || null;
-    const { data: records } = await supabase.from('daily_records').select('record_date,cash,float_cash,sent').eq('branch_id', b.id).eq('sent', true).gte('record_date', lastRemitDate || '2000-01-01').order('record_date', { ascending: false });
-    const offset = (allOffsets || []).find(x => x.branch_id === b.id);
-    const p = calc.cashPending(records || [], lastRemitDate, offset ? N(offset.amount) : 0);
+    const branchRemits = (allRemits || []).filter(x => x.branch_id === b.id)
+      .sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)));
+    const cutoff = branchRemits[0]?.through_record_date || branchRemits[0]?.remit_date || null;
+    const { data: records } = await supabase.from('daily_records').select('record_date,cash,float_cash,sent').eq('branch_id', b.id).eq('sent', true)
+      .gte('record_date', b.cash_tracking_from || '2000-01-01').order('record_date', { ascending: false });
+    const p = calc.cashPending(records || [], cutoff);
     return { b, p, isToday: !!(round && round.branch_ids.includes(b.id)) };
   }));
   const todays = list.filter(x => x.isToday);
-  const collected = (allRemits || []).filter(x => x.method !== 'loan').reduce((s, x) => s + N(x.amount), 0);
-  const forwarded = (headRemits || []).reduce((s, x) => s + N(x.amount), 0);
+  const cashStart=BRANCHES.reduce((m,b)=>!m||b.cash_tracking_from>m?b.cash_tracking_from:m,null);
+  const collected = (allRemits || []).filter(x=>x.method==='cash'&&(!cashStart||x.remit_date>=cashStart)).reduce((s, x) => s + N(x.amount), 0);
+  const forwarded = (headRemits || []).filter(x=>!cashStart||x.remit_date>=cashStart).reduce((s, x) => s + N(x.amount), 0);
   const held = collected - forwarded;
 
   const rowsToday = todays.map(({ b, p }) => `
@@ -498,15 +506,21 @@ async function renderCash(body) {
 async function doRemitBranch(bid, method, list) {
   const item = list.find(x => x.b.id === bid);
   if (!item || item.p.amount <= 0) { toast('ไม่มีเงินสดค้างส่ง'); return; }
-  await supabase.from('cash_remittances').insert({ branch_id: bid, remit_date: TODAY, amount: item.p.amount, method });
-  await supabase.from('remit_loan_offsets').upsert({ branch_id: bid, amount: 0 }, { onConflict: 'branch_id' });
+  const btn = document.querySelector(`[data-remitb="${CSS.escape(bid)}"][data-remitm="${CSS.escape(method)}"]`);
+  if (btn) btn.disabled = true;
+  const { error } = await supabase.from('cash_remittances').insert({
+    branch_id: bid, remit_date: TODAY, amount: item.p.amount, method, through_record_date: item.p.throughDate,
+  });
+  if (error) { if (btn) btn.disabled = false; toast('บันทึกรับเงินไม่สำเร็จ: ' + error.message); return; }
   const bname = (BRANCHES.find(x => x.id === bid) || {}).name || bid;
   toast(`รับเงินจากสาขา${bname} แล้ว ${baht(item.p.amount)} บาท`);
   await draw($('#roleRoot'));
 }
 async function doHeadRemit(method, held) {
   if (held <= 0) { toast('ไม่มีเงินสดค้างส่ง'); return; }
-  await supabase.from('head_remittances').insert({ remit_date: TODAY, amount: held, method });
+  const btn = $(method === 'cash' ? '#headRemitCash' : '#headRemitTransfer'); if (btn) btn.disabled = true;
+  const { error } = await supabase.from('head_remittances').insert({ remit_date: TODAY, amount: held, method });
+  if (error) { if (btn) btn.disabled = false; toast('บันทึกส่งเงินไม่สำเร็จ: ' + error.message); return; }
   toast((method === 'cash' ? 'บันทึกว่าส่งเงินสดให้เจ้าของแล้ว ' : 'บันทึกว่าฝากธนาคารแล้ว ') + baht(held) + ' บาท');
   await draw($('#roleRoot'));
 }
@@ -520,10 +534,9 @@ async function renderClock(body) {
 
   // เงินเดือนหัวหน้าประมาณการเดือนนี้ (ใช้ทุกสาขา)
   const dates = monthDates(TODAY);
-  const [{ data: allRecords }, { data: allClocks }, { data: advances }, { data: whRentRows }, { data: myEmp }] = await Promise.all([
+  const [{ data: allRecords }, { data: allClocks }, { data: whRentRows }, { data: myEmp }] = await Promise.all([
     supabase.from('daily_records').select('*').gte('record_date', dates[0]).lte('record_date', dates[dates.length - 1]),
     supabase.from('clock_records').select('*').gte('clock_date', dates[0]).lte('clock_date', dates[dates.length - 1]),
-    supabase.from('advances').select('*').is('branch_id', null).eq('staff_name', ME.name),
     supabase.from('warehouse_rent_history').select('*').order('effective_from'),
     supabase.from('employees').select('*').eq('id', ME.id).maybeSingle(),
   ]);
@@ -534,7 +547,7 @@ async function renderClock(body) {
   const whRent = calc.rentAt(whRentHistory, dates[0]);
   const pr = calc.payrollForRelief({
     relief: { name: ME.name, base_salary: myEmp?.base_salary ?? 9000, delivery_pay: myEmp?.delivery_pay ?? 0 },
-    allBranchRecords: allRecords || [], allBranchClocksByDate, advancesForRelief: advances || [], todayISO: TODAY, cfg, whRent,
+    allBranchRecords: allRecords || [], allBranchClocksByDate, todayISO: TODAY, cfg, whRent,
   });
 
   const payCard = `<div class="card pad">
@@ -548,7 +561,6 @@ async function renderClock(body) {
         <div class="payrow"><span>ค่าเช่าคลังกลาง</span><span class="n">${baht(pr.whRent)}</span></div>
         <div class="payrow"><span>ค่าแก้ว (${pr.cups} ใบ)</span><span class="n">${baht(pr.cupPay)}</span></div>
         ${pr.deduct ? `<div class="payrow neg"><span>หัก ลืมลงเวลา${pr.noClock ? ` ${pr.noClock} ครั้ง × 40` : ''}</span><span class="n">−${baht(pr.deduct)}</span></div>` : ''}
-        ${pr.advanceDeduct ? `<div class="payrow neg"><span>หักเบิกล่วงหน้า/เงินกู้ค้างอยู่</span><span class="n">−${baht(pr.advanceDeduct)}</span></div>` : ''}
       </div>
       <p class="sub" style="margin-top:8px">ไปทำแทนสาขาไม่หักมาสาย/ปิดไว — แต่ต้องลงเวลาให้ครบทั้งเข้าและออก ลืมหัก 40 บาท/ครั้ง</p>
     </div>`;
@@ -652,7 +664,9 @@ async function doReliefOpenCount(b, prev) {
   const yenEl = $('#rOpenYen'), panEl = $('#rOpenPan');
   if (yenEl.value === '' || panEl.value === '') { toast('กรอกแก้วเย็น/ปั่นให้ครบก่อนยืนยัน'); return; }
   const newYen = N(yenEl.value), newPan = N(panEl.value);
-  await supabase.from('clock_records').update({ open_yen: newYen, open_pan: newPan }).eq('branch_id', b.id).eq('clock_date', TODAY);
+  if(newYen<0||newPan<0||!Number.isInteger(newYen)||!Number.isInteger(newPan)){toast('จำนวนแก้วต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป');return;}
+  const {error}=await supabase.from('clock_records').update({ open_yen: newYen, open_pan: newPan }).eq('branch_id', b.id).eq('clock_date', TODAY);
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   if (prev && (newYen !== prev.yen || newPan !== prev.pan)) {
     const cfg = getSettings();
     const valueDiff = (newYen - prev.yen) * cfg.cupPrice.yen + (newPan - prev.pan) * cfg.cupPrice.pan;
@@ -673,11 +687,14 @@ async function doReliefSend(b, clock, prev) {
     return;
   }
   // สต๊อกวัตถุดิบใช้ของยอดปิดล่าสุด (วันไปแทนไม่ต้องนับ) แต่ "แถวแก้ว" คิดจากที่นับวันนี้ — submitClose จัดการให้แล้ว
+  if(todayISO()!==TODAY){await draw($('#roleRoot'));toast('ข้ามวันแล้ว โหลดข้อมูลวันใหม่ให้แล้ว');return;}
+  const btn=$('#reliefSendBtn');if(btn){btn.disabled=true;btn.textContent='กำลังบันทึก…';}
   const { error } = await submitClose({
     branchId: b.id, dateISO: TODAY, staffName: ME.name, draft: d, cfg: getSettings(),
     stockItems: STOCK_ITEMS, prevSnapshot: prev ? prev.stock_snapshot : {}, createdBy: ME.id,
+    openYen:clock.open_yen,openPan:clock.open_pan,
   });
-  if (error) { toast('บันทึกไม่สำเร็จ: ' + error.message); return; }
+  if (error) { if(btn)btn.disabled=false;toast('บันทึกไม่สำเร็จ: ' + error.message); return; }
   S.reliefDraft = null; S.reliefErrors = {};
   toast('บันทึกยอดแทนสาขา' + b.name + ' เรียบร้อย — ค่าแก้ววันนี้เข้าเงินเดือนของคุณ');
   await draw($('#roleRoot'));

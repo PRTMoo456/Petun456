@@ -20,7 +20,7 @@ export async function loadRefs() {
   // เพื่อไม่ให้การวาดหน้าจอ/สลับแท็บยิง query เดิมซ้ำโดยไม่จำเป็น
   if (!refsPromise) {
     refsPromise = Promise.all([
-      supabase.from('branches').select('id,name,float_cash,days_off_quota,holiday_work_days,gps_lat,gps_lng,gps_radius,work_start,work_end,late_grace_min,company_id,active').eq('active', true).order('id'),
+      supabase.from('branches').select('id,name,float_cash,days_off_quota,holiday_work_days,gps_lat,gps_lng,gps_radius,work_start,work_end,late_grace_min,company_id,active,cash_tracking_from').eq('active', true).order('id'),
       supabase.from('stock_items').select('id,name,unit,min_qty,per_case,branch_price,category_id,display_order,active').eq('active', true).order('display_order'),
       supabase.from('delivery_rounds').select('id,name,day_of_week,branch_ids'),
     ]).then(results => {

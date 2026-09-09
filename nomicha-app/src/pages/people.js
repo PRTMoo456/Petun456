@@ -105,7 +105,7 @@ export function bindPeopleCard(body, { reload, saveBranch, saveRent, saveWhRent 
   body.querySelectorAll('input[data-pf]').forEach(inp => inp.addEventListener('change', async () => {
     const k = inp.dataset.pf, id = inp.dataset.id;
     let v = inp.value.trim();
-    if (k === 'base_salary' || k === 'delivery_pay') { const n = num(inp, inp.defaultValue); if (n === null) return; v = n; }
+    if (k === 'base_salary' || k === 'delivery_pay') { const n = num(inp, inp.defaultValue); if (n === null) return; if(n<0){toast('จำนวนเงินติดลบไม่ได้');inp.value=inp.defaultValue;return;} v = n; }
     else if (k === 'name' && !v) { inp.value = inp.defaultValue; toast('ชื่อเล่นว่างไม่ได้'); return; }
     else if (!v) v = null;
     const { error } = await supabase.from('employees').update({ [k]: v }).eq('id', id);
@@ -130,15 +130,17 @@ export function bindPeopleCard(body, { reload, saveBranch, saveRent, saveWhRent 
     const k = inp.dataset.br;
     if (k === 'work_start' || k === 'work_end') { saveBranch(inp.dataset.bid, { [k]: inp.value }, 'บันทึกเวลาทำงานแล้ว — มีผลกับการลงเวลาครั้งถัดไป'); return; }
     const n = num(inp, inp.defaultValue); if (n === null) return;
+    if (['days_off_quota','late_grace_min','gps_radius'].includes(k) && (n<0||!Number.isInteger(n))) { toast('ค่านี้ต้องเป็นจำนวนเต็มตั้งแต่ 0'); inp.value=inp.defaultValue; return; }
     inp.defaultValue = inp.value;
     saveBranch(inp.dataset.bid, { [k]: n }, 'บันทึกแล้ว');
   }));
   body.querySelectorAll('input[data-rent]').forEach(inp => inp.addEventListener('change', () => {
     const n = num(inp, inp.defaultValue); if (n === null) return;
+    if(n<0){toast('ค่าเช่าติดลบไม่ได้');inp.value=inp.defaultValue;return;}
     inp.defaultValue = inp.value; saveRent(inp.dataset.rent, n);
   }));
   const wh = body.querySelector('input[data-whrent]');
-  if (wh) wh.addEventListener('change', () => { const n = num(wh, wh.defaultValue); if (n === null) return; wh.defaultValue = wh.value; saveWhRent(n); });
+  if (wh) wh.addEventListener('change', () => { const n = num(wh, wh.defaultValue); if (n === null) return; if(n<0){toast('ค่าเช่าติดลบไม่ได้');wh.value=wh.defaultValue;return;} wh.defaultValue = wh.value; saveWhRent(n); });
 
   // เปลี่ยนชื่อผู้ใช้ / ตั้งรหัสผ่านใหม่ / สร้างบัญชี — ผ่าน Edge Function ทั้งหมด
   body.querySelectorAll('button[data-saveuname]').forEach(btn => btn.addEventListener('click', async () => {

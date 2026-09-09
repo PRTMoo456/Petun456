@@ -102,8 +102,7 @@ export function staffSlipHTML(branch, pr, monthLabelStr, companies) {
      [`เบี้ยขยัน${pr.reset ? ' (โดนรีเซ็ตเดือนนี้)' : ''}`, pr.diligence],
      pr.holidayPay && [`ค่าทำงานวันหยุด (${branch.holiday_work_days || 0} วัน)`, pr.holidayPay],
      [`ค่าแก้ว (${pr.cups} ใบ)`, pr.cupPay],
-     pr.deduct && ['หัก สาย/ปิดไว/ไม่ลงเวลา/หยุดเกินโควตา', pr.deduct, true],
-     pr.advanceDeduct && ['หักเบิกล่วงหน้า/เงินกู้ค้างอยู่', pr.advanceDeduct, true]],
+     pr.deduct && ['หัก สาย/ปิดไว/ไม่ลงเวลา/หยุดเกินโควตา', pr.deduct, true]],
     pr.total, monthLabelStr);
 }
 // relief = {name, role, first_name, last_name, national_id, base_salary, delivery_pay} — pr จาก calc.payrollForRelief()
@@ -117,8 +116,7 @@ export function reliefSlipHTML(relief, pr, monthLabelStr, companies) {
      ['เงินส่งของ', relief.delivery_pay],
      ['ค่าเช่าคลังกลาง', pr.whRent],
      [`ค่าแก้ว (${pr.cups} ใบ)`, pr.cupPay],
-     pr.deduct && [`หัก ลืมลงเวลา${pr.noClock ? ` ${pr.noClock} ครั้ง` : ''} (ไม่หักมาสาย/ปิดไว)`, pr.deduct, true],
-     pr.advanceDeduct && ['หักเบิกล่วงหน้า/เงินกู้ค้างอยู่', pr.advanceDeduct, true]],
+     pr.deduct && [`หัก ลืมลงเวลา${pr.noClock ? ` ${pr.noClock} ครั้ง` : ''} (ไม่หักมาสาย/ปิดไว)`, pr.deduct, true]],
     pr.total, monthLabelStr);
 }
 
@@ -135,7 +133,11 @@ const slipHead = (companies, title, sub, rightSub) => `<div class="slip-head">
 export function deliveryReportHTML({ dlv, branch, roundName, staffName, reliefName, reliefRole, stockItems, companies, overuse = 0.5 }) {
   const entries = Object.entries(dlv.items || {});
   const totalQty = entries.reduce((s, [, qty]) => s + qty, 0);
-  const totalCost = entries.reduce((s, [id, qty]) => { const it = stockItems.find(x => String(x.id) === String(id)); return s + (it ? qty * it.branch_price : 0); }, 0);
+  const totalCost = entries.reduce((s, [id, qty]) => {
+    const it = stockItems.find(x => String(x.id) === String(id));
+    const price = dlv.price_snapshot && dlv.price_snapshot[id] != null ? Number(dlv.price_snapshot[id]) : it?.branch_price;
+    return s + (it && Number.isFinite(price) ? qty * price : 0);
+  }, 0);
   const items = stockItems.filter(it => dlv.items && dlv.items[it.id] != null).map(it => {
     const qty = dlv.items[it.id];
     const rq = dlv.received ? dlv.received[it.id] : null;
@@ -214,7 +216,8 @@ export function deliveryMonthHTML({ list, branches, stockItems, monthLabelStr, c
   const valOf = dlv => Object.entries(dlv.items || {}).reduce((s, [id, qty]) => {
     const it = stockItems.find(x => String(x.id) === String(id)); if (!it) return s;
     const actual = (dlv.received && dlv.received[id] != null) ? dlv.received[id] : qty;
-    return s + actual * it.branch_price;
+    const price = dlv.price_snapshot && dlv.price_snapshot[id] != null ? Number(dlv.price_snapshot[id]) : it.branch_price;
+    return s + actual * price;
   }, 0);
   const total = list.reduce((s, x) => s + valOf(x), 0);
   const rows = list.map(dlv => {

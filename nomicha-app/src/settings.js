@@ -11,11 +11,6 @@ export async function loadSettings() {
   for (const row of data) s[row.key] = row.value;
   cache = {
     grabCommissionPct: s.grab_commission_pct ?? 0.321,
-    advanceCap: s.advance_cap ?? 4000,
-    loanCap: s.loan_cap ?? 2000,
-    loanInterestPct: s.loan_interest_pct ?? 0.10,
-    advanceDay: s.advance_day ?? 20,
-    settleDays: s.settle_days ?? [5, 20],
     cupPrice: s.cup_price ?? { yen: 25, pan: 35 },
     cupsPerRow: s.cups_per_row ?? { yen: 50, pan: 25 },
     diligenceRules: s.diligence_rules ?? { step: 500, cap: 1500, lateAllowance: 250 },
@@ -31,3 +26,5 @@ export function getSettings() {
   if (!cache) throw new Error('settings ยังไม่ได้โหลด — เรียก loadSettings() ก่อน');
   return cache;
 }
+
+export function invalidateSettings() { cache = null; }

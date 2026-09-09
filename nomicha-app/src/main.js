@@ -1,7 +1,7 @@
 import { supabase } from './supabaseClient.js';
 import { getSession, getMyEmployee, renderLogin, signOut } from './auth.js';
 import { loadRefs, invalidateRefs } from './refs.js';
-import { loadSettings } from './settings.js';
+import { loadSettings, invalidateSettings } from './settings.js';
 import { $ } from './util.js';
 import { renderStaffApp } from './pages/staff.js';
 import { renderReliefApp } from './pages/relief.js';
@@ -48,7 +48,7 @@ function roleLabel(r) {
 
 // พาไปหน้าล็อกอินอัตโนมัติถ้าเซสชันหมดอายุ/ออกจากระบบระหว่างใช้งาน
 supabase.auth.onAuthStateChange((event) => {
-  if (event === 'SIGNED_OUT') { invalidateRefs(); setTimeout(boot, 0); }
+  if (event === 'SIGNED_OUT') { invalidateRefs(); invalidateSettings(); setTimeout(boot, 0); }
 });
 
 boot();

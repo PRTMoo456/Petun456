@@ -6,9 +6,7 @@
 // จากยอดปิดของวันก่อนหน้า ถ้าวันนั้นไม่มีการนับแก้วยืนยัน (clock.openYen) เพราะข้อมูลสาธิตบางวันไม่ครบ
 // ระบบจริงบังคับให้พนักงานยืนยันนับแก้ว (clock_records.open_yen/open_pan) ทุกวันก่อนปิดยอดได้เสมอ (ดู pages/staff.js)
 // จึงใช้ค่า open_yen/open_pan ของ "วันนั้นเอง" เป็นฐานได้ตรง ๆ โดยไม่ต้องไล่ย้อนหาวันก่อนหน้า — ง่ายกว่าและถูกต้องเท่ากัน
-import { N, isoDate, hmToMin } from './util.js';
-
-export const isSettled = (a, todayISO) => a.repaid || a.due_date < todayISO;
+import { N, hmToMin } from './util.js';
 
 // พอร์ตจาก rentAt()/whRentAt() — ค่าเช่าที่มีผล ณ วันที่กำหนด (แก้ค่าเช่าวันนี้ไม่มีผลย้อนหลังไปเดือนที่ผ่านไปแล้ว)
 // history: [{from:'YYYY-MM-DD', rent:น้ำหนัก}] เรียงจากเก่าไปใหม่ (ตรงกับ branch_rent_history/warehouse_rent_history)
@@ -17,49 +15,6 @@ export function rentAt(history, dateISO) {
   let v = history[0].rent;
   for (const e of history) { if (e.from <= dateISO) v = e.rent; else break; }
   return v;
-}
-
-// พอร์ตจาก isAdvanceDay()/nextSettleDate() — ใช้ตอนพนักงานขอเบิกเงิน/เงินกู้
-export const isAdvanceDay = (dateISO, advanceDay) => new Date(dateISO + 'T00:00:00').getDate() === advanceDay;
-// วันครบกำหนดหักคืนของเงินเบิก/เงินกู้ — ต้องใช้ isoDate() ห้าม toISOString() (ที่ไทยจะได้วันที่เลื่อนไป 1 วัน
-// ทำให้เงินกู้ถูกนับว่า "หักคืนแล้ว" เร็วไป 1 วัน แล้วยอดหักไปโผล่ผิดงวด) — ต้นแบบใช้ isoDate เหมือนกัน
-export function nextSettleDate(dateISO, settleDays) {
-  const d0 = new Date(dateISO + 'T00:00:00');
-  for (let i = 1; i <= 40; i++) {
-    const t = new Date(d0); t.setDate(d0.getDate() + i);
-    if (settleDays.includes(t.getDate())) return isoDate(t);
-  }
-  return dateISO;
-}
-
-// พอร์ตจาก outstanding()/loanRoom()/roomFor() — วงเงินเบิก/กู้ที่ยังขอได้อีกของคนคนหนึ่ง
-const outstanding = (advancesForPerson, todayISO, type) =>
-  advancesForPerson.filter(a => !isSettled(a, todayISO) && a.type === type).reduce((s, a) => s + a.amount, 0);
-const loanRoom = (advancesForPerson, todayISO, loanCap) =>
-  Math.max(0, loanCap - outstanding(advancesForPerson, todayISO, 'loan'));
-export const roomFor = (advancesForPerson, todayISO, onAdvDay, cfg) => onAdvDay
-  ? Math.max(0, cfg.advanceCap - outstanding(advancesForPerson, todayISO, 'advance'))
-  : loanRoom(advancesForPerson, todayISO, cfg.loanCap);
-
-// พอร์ตจาก advBreakdown() — สรุปยอดเบิก/กู้ที่ยังไม่ครบกำหนดของคนคนหนึ่ง แยกเป็น 3 ก้อนตามที่มา
-function advBreakdown(advancesForPerson, todayISO, advanceDay) {
-  const list = advancesForPerson.filter(a => !isSettled(a, todayISO));
-  const sum = f => list.filter(f).reduce((s, a) => s + a.total, 0);
-  const isRemit = a => a.source === 'remit';
-  const due20 = a => new Date(a.due_date + 'T00:00:00').getDate() === advanceDay;
-  const advance = sum(a => !isRemit(a) && a.type === 'advance');
-  const loanAll = sum(a => !isRemit(a) && a.type === 'loan');
-  const remitAll = sum(isRemit);
-  const loan20 = sum(a => !isRemit(a) && a.type === 'loan' && due20(a));
-  const remit20 = sum(a => isRemit(a) && due20(a));
-  const absLoan = Math.min(advance, loan20);
-  const absRemit = Math.min(Math.max(0, advance - loan20), remit20);
-  const loan = loanAll - absLoan, remit = remitAll - absRemit;
-  return {
-    loan, advance, remit, total: loan + advance + remit,
-    // r20 = สรุปยอดที่ "หักกลบกันแล้ว" ในรอบจ่ายเงินเบิกวันที่ 20 — เจ้าของใช้ดูตอนจ่ายรอบนั้น (ตารางเงินเดือน ownPay)
-    r20: { advance, loan: loan20, remit: remit20, payout: Math.max(0, advance - loan20 - remit20) },
-  };
 }
 
 /* ============================== มาสาย / ปิดไว ==============================
@@ -85,25 +40,30 @@ export function calcDay(rec, clock, cfg) {
     return { cupYen: 0, cupPan: 0, cups: 0, income: 0, expense: 0,
       expectedTotal: float, variance: N(rec.cash) - float };
   }
-  const openYen = clock ? clock.open_yen : null, openPan = clock ? clock.open_pan : null;
+  const openYen = rec.open_yen != null ? rec.open_yen : (clock ? clock.open_yen : null);
+  const openPan = rec.open_pan != null ? rec.open_pan : (clock ? clock.open_pan : null);
   const cupYen = openYen != null ? (openYen + N(rec.yen_add) - N(rec.yen)) : 0;
   const cupPan = openPan != null ? (openPan + N(rec.pan_add) - N(rec.pan)) : 0;
-  const income = cupYen * cfg.cupPrice.yen + cupPan * cfg.cupPrice.pan + N(rec.cup_own) + N(rec.topping) + N(rec.other);
+  const yenPrice = rec.cup_price_yen != null ? N(rec.cup_price_yen) : cfg.cupPrice.yen;
+  const panPrice = rec.cup_price_pan != null ? N(rec.cup_price_pan) : cfg.cupPrice.pan;
+  const grabPct = rec.grab_commission_pct != null ? N(rec.grab_commission_pct) : cfg.grabCommissionPct;
+  const income = cupYen * yenPrice + cupPan * panPrice + N(rec.cup_own) + N(rec.topping) + N(rec.other);
   const expense = N(rec.ice) + N(rec.water) + N(rec.etc);
   const expectedTotal = N(rec.float_cash) + income - expense;
-  const expectedCash = expectedTotal - (N(rec.transfer) + N(rec.grab) * (1 - cfg.grabCommissionPct) + N(rec.thaichaithai));
-  return { cupYen, cupPan, cups: cupYen + cupPan, income, expense, expectedTotal, variance: N(rec.cash) - expectedCash };
+  const expectedCash = expectedTotal - (N(rec.transfer) + N(rec.grab) * (1 - grabPct) + N(rec.thaichaithai));
+  return { cupYen, cupPan, cups: cupYen + cupPan, income, expense, expectedTotal,
+    grabCommission: N(rec.grab) * grabPct, variance: N(rec.cash) - expectedCash };
 }
 
 // ยอดขายสุทธิของสาขาในเดือน — ต้องการ records + map ของ clock ตาม record_date (clocksByDate[date] = clock row)
 export function aggregateBranchSales(records, clocksByDate, cfg) {
-  let sales = 0, grab = 0;
+  let sales = 0, grab = 0, grabCommission = 0;
   for (const r of records) {
     if (!r.sent) continue;
     const c = calcDay(r, clocksByDate[r.record_date], cfg);
-    if (c) { sales += c.income - c.expense; grab += N(r.grab); }
+    if (c) { sales += c.income - c.expense; grab += N(r.grab); grabCommission += N(c.grabCommission); }
   }
-  return { sales, grab };
+  return { sales, grab, grabCommission };
 }
 
 /* นับ "ลืมลงเวลา" ของคนคนหนึ่ง — หัก 40 บาท/ครั้ง (RULES.noClock)
@@ -125,7 +85,7 @@ function countNoClock(clockRows, workedDates, todayISO) {
 /* พอร์ตจาก payrollFor() — เงินเดือน "ของสาขา" ในเดือนที่กำหนด (1 สาขา = 1 บัญชี = 1 ก้อนเงินเดือน)
    records/clocks = ทุกแถวของสาขานั้นในเดือนนั้น ฟังก์ชันกรองเอง: นับทุกแถวของสาขา ยกเว้นวันที่หัวหน้ามาทำแทน
    (เจ้าของเลือกไว้ 5 ก.ย. 69 — ถ้าเปลี่ยนคนกลางเดือน ยอดยังรวมเป็นก้อนเดียวของสาขา ไม่แยกตามชื่อคน) */
-export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, advancesForStaff, todayISO, cfg }) {
+export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, todayISO, cfg }) {
   const ofBranch = n => !branch.relief_name || n !== branch.relief_name;   // ทุกคนที่ไม่ใช่หัวหน้า = คนของสาขา
   const workRecords = records.filter(r => !r.store_closed);
   const closureByDate = new Map(records.filter(r => r.store_closed).map(r => [r.record_date, r]));
@@ -157,15 +117,14 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, adv
   const R = cfg.payRules;
   const cupPay = cups * R.cupPay;
   const deduct = late * R.latePerMin + early * R.earlyPerMin + noClock * R.noClock + excess * R.excessDayOff;
-  const advBreak = advBreakdown(advancesForStaff, todayISO, cfg.advanceDay);
-  const total = branch.base_salary + diligence + holidayPay + cupPay - deduct - advBreak.total;
-  return { cups, late, early, noClock, daysOffTaken, excess, reset, diligence, holidayPay, cupPay, deduct, advBreak, total, advanceDeduct: advBreak.total };
+  const total = branch.base_salary + diligence + holidayPay + cupPay - deduct;
+  return { cups, late, early, noClock, daysOffTaken, excess, reset, diligence, holidayPay, cupPay, deduct, total };
 }
 
 /* พอร์ตจาก payrollForRelief() — เงินเดือนหัวหน้า (ไม่ผูกสาขาเดียว วนดูทุกสาขาที่ไปแทน)
    ต่างจากพนักงานสาขา (เจ้าของสั่งแก้ 5 ก.ย. 69): หัวหน้าไปทำแทนหลายสาขาคนละเวลา บางวันต้องไปส่งของก่อนแล้วค่อยไปเปิดร้าน
    จึงไม่หัก "มาสาย/ปิดไว" กับหัวหน้า — แต่ยัง "ต้องลงเวลาให้ครบเข้า-ออก" เหมือนกัน ลืมลงเวลายังหัก 40 บาท/ครั้ง */
-export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDate, advancesForRelief, todayISO, cfg, whRent }) {
+export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDate, todayISO, cfg, whRent }) {
   let cups = 0;
   allBranchRecords.forEach(r => {
     if (!r.store_closed && r.sent && r.staff_name === relief.name) {
@@ -181,17 +140,16 @@ export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDa
   const noClock = countNoClock(myClocks, workedDates, todayISO);
   const cupPay = cups * cfg.payRules.cupPay;
   const deduct = noClock * cfg.payRules.noClock;   // ไม่มีหักมาสาย/ปิดไว
-  const advBreak = advBreakdown(advancesForRelief, todayISO, cfg.advanceDay);
-  const total = relief.base_salary + relief.delivery_pay + whRent + cupPay - deduct - advBreak.total;
-  return { cups, noClock, deduct, cupPay, whRent, advBreak, total, advanceDeduct: advBreak.total, diligence: 0, holidayPay: 0, reset: false, late: 0, early: 0 };
+  const total = relief.base_salary + relief.delivery_pay + whRent + cupPay - deduct;
+  return { cups, noClock, deduct, cupPay, whRent, total, diligence: 0, holidayPay: 0, reset: false, late: 0, early: 0 };
 }
 
 // พอร์ตจาก branchPL() — กำไร/ขาดทุนรายสาขาในเดือนที่กำหนด
-export function branchPL({ sales, grab, materialCost, rent, repairs, grabCommissionPct, payroll }) {
+export function branchPL({ sales, grab, materialCost, rent, repairs, grabCommissionPct, grabCommission: snapCommission, payroll }) {
   const materialRate = sales > 0 ? materialCost / sales : 0;
-  const labor = payroll.total + payroll.advanceDeduct;
+  const labor = payroll.total;
   const repairsTotal = repairs.reduce((s, x) => s + Number(x.cost), 0);
-  const grabCommission = grab * grabCommissionPct;
+  const grabCommission = snapCommission == null ? grab * grabCommissionPct : snapCommission;
   const net = (sales - materialCost) - labor - rent - repairsTotal - grabCommission;
   return { sales, materialCost, materialRate, labor, rent, repairs: repairsTotal, grabCommission, net };
 }
@@ -201,7 +159,8 @@ export function monthMaterialCost(deliveries, stockItemsById) {
   return deliveries.reduce((s, dlv) => s + Object.entries(dlv.items).reduce((s2, [id, qty]) => {
     const it = stockItemsById[id]; if (!it) return s2;
     const actual = dlv.received && dlv.received[id] != null ? dlv.received[id] : qty;
-    return s2 + actual * it.branch_price;
+    const price = dlv.price_snapshot && dlv.price_snapshot[id] != null ? N(dlv.price_snapshot[id]) : it.branch_price;
+    return s2 + actual * price;
   }, 0), 0);
 }
 
@@ -217,20 +176,24 @@ export function pickList(stockItems, parByItemId, lastStockSnapshot) {
 // พอร์ตจาก warehousePL() — กำไรคลังกลาง (ส่วนต่างราคาวัตถุดิบของทุกอย่างที่ส่งออกไปในเดือน ลบค่าแรงหัวหน้าเต็มจำนวน)
 export function warehousePL({ deliveries, externalSales, stockItemsById, avgCostById, reliefPayroll }) {
   let sales = 0, cost = 0;
-  const add = (qty, price, itemId) => { sales += qty * price; cost += qty * (avgCostById[itemId] ?? 0); };
+  const add = (qty, price, itemId, unitCost) => { sales += qty * price; cost += qty * (unitCost ?? avgCostById[itemId] ?? 0); };
   deliveries.forEach(dlv => Object.entries(dlv.items).forEach(([id, qty]) => {
     const it = stockItemsById[id]; if (!it) return;
     const actual = dlv.received && dlv.received[id] != null ? dlv.received[id] : qty;
-    add(actual, it.branch_price, id);
+    const price = dlv.price_snapshot && dlv.price_snapshot[id] != null ? N(dlv.price_snapshot[id]) : it.branch_price;
+    const unitCost = dlv.cost_snapshot && dlv.cost_snapshot[id] != null ? N(dlv.cost_snapshot[id]) : undefined;
+    add(actual, price, id, unitCost);
   }));
-  externalSales.forEach(sale => sale.items.forEach(li => add(li.qty, li.price, li.item_id)));
-  const headLabor = reliefPayroll.total + reliefPayroll.advanceDeduct;
+  externalSales.forEach(sale => sale.items.forEach(li => add(li.qty, li.price, li.item_id, li.cost)));
+  const headLabor = reliefPayroll.total;
   return { sales, cost, materialMargin: sales - cost, headLabor, net: sales - cost - headLabor };
 }
 
 // พอร์ตจาก cashSurplus()/cashPending() — เงินสดที่สาขาเก็บไว้เกินเงินทอนตั้งต้น ต้องส่งให้หัวหน้า
-export function cashPending(records, lastRemitDate, remitLoanOffset) {
-  const dates = records.filter(r => r.sent && (!lastRemitDate || r.record_date > lastRemitDate));
-  const raw = dates.reduce((s, r) => s + Math.max(0, N(r.cash) - N(r.float_cash)), 0);
-  return { dates: dates.map(r => r.record_date), amount: Math.max(0, raw - (remitLoanOffset || 0)) };
+export function cashPending(records, lastRemitDate) {
+  const pendingRows = records.filter(r => r.sent && (!lastRemitDate || r.record_date > lastRemitDate));
+  const cashRows = pendingRows.filter(r => N(r.cash) > N(r.float_cash));
+  const raw = cashRows.reduce((s, r) => s + N(r.cash) - N(r.float_cash), 0);
+  return { dates: cashRows.map(r => r.record_date), amount: Math.max(0, raw),
+    throughDate: pendingRows.reduce((m, r) => !m || r.record_date > m ? r.record_date : m, lastRemitDate || null) };
 }

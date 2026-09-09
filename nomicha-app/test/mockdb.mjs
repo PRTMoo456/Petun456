@@ -6,9 +6,9 @@ export function makeDb(TODAY) {
   const d = (offset) => { const x = new Date(TODAY + 'T00:00:00'); x.setDate(x.getDate() + offset);
     return x.getFullYear() + '-' + p2(x.getMonth() + 1) + '-' + p2(x.getDate()); };
   const branches = [
-    { id: 'lnd', company_id: 'branch_co', name: 'เหล่านาดี', float_cash: 300, days_off_quota: 2, holiday_work_days: 1, gps_lat: 16.411445, gps_lng: 102.811, gps_radius: 100, work_start: '08:00', work_end: '18:00', late_grace_min: 0, active: true },
-    { id: 'bwa', company_id: 'branch_co', name: 'บ้านหว้า', float_cash: 300, days_off_quota: 4, holiday_work_days: 0, gps_lat: 16.384157, gps_lng: 102.706986, gps_radius: 100, work_start: '09:00', work_end: '19:00', late_grace_min: 10, active: true },
-    { id: 'nlb', company_id: 'branch_co', name: 'หนองหลุบ', float_cash: 300, days_off_quota: 2, holiday_work_days: 0, gps_lat: 16.470103, gps_lng: 102.755351, gps_radius: 100, work_start: '08:30', work_end: '18:30', late_grace_min: 5, active: true },
+    { id: 'lnd', company_id: 'branch_co', name: 'เหล่านาดี', float_cash: 300, cash_tracking_from:'2026-01-01', days_off_quota: 2, holiday_work_days: 1, gps_lat: 16.411445, gps_lng: 102.811, gps_radius: 100, work_start: '08:00', work_end: '18:00', late_grace_min: 0, active: true },
+    { id: 'bwa', company_id: 'branch_co', name: 'บ้านหว้า', float_cash: 300, cash_tracking_from:'2026-01-01', days_off_quota: 4, holiday_work_days: 0, gps_lat: 16.384157, gps_lng: 102.706986, gps_radius: 100, work_start: '09:00', work_end: '19:00', late_grace_min: 10, active: true },
+    { id: 'nlb', company_id: 'branch_co', name: 'หนองหลุบ', float_cash: 300, cash_tracking_from:'2026-01-01', days_off_quota: 2, holiday_work_days: 0, gps_lat: 16.470103, gps_lng: 102.755351, gps_radius: 100, work_start: '08:30', work_end: '18:30', late_grace_min: 5, active: true },
   ];
   const stock_items = [
     { id: 0, name: 'แก้วเย็นโนมิชา', unit: 'แถว', min_qty: 2, per_case: 20, branch_price: 65, display_order: 0, active: true },
@@ -34,7 +34,7 @@ export function makeDb(TODAY) {
       const yen = openYen - (10 + i), pan = openPan - (4 + bi);
       daily_records.push({
         id: `r-${b.id}-${i}`, branch_id: b.id, record_date: date, staff_name,
-        yen, yen_add: 0, pan, pan_add: 0, cup_own: 20, topping: 35, other: 0,
+        open_yen:openYen,open_pan:openPan,yen, yen_add: 0, pan, pan_add: 0, cup_price_yen:25,cup_price_pan:35,grab_commission_pct:0.321,cup_own: 20, topping: 35, other: 0,
         ice: 60, water: 20, etc: 0, cash: 900 + bi * 40, transfer: 250, grab: 180, thaichaithai: 60,
         float_cash: 300, stock_snapshot: { 0: Math.floor(yen / 50), 1: Math.floor(pan / 25), 2: 3, 3: 6 },
         sent: true, closed: true, created_by: 'u-' + b.id,
@@ -60,7 +60,7 @@ export function makeDb(TODAY) {
     branches, stock_items, employees, daily_records, clock_records,
     // เลขบัตรประชาชนอยู่คนละตาราง — RLS เปิดให้เฉพาะเจ้าของกับเจ้าตัว (หัวหน้าอ่านไม่ได้)
     employee_private: [{ employee_id: 'u-lnd', national_id: '1409901234560' }],
-    // ตั้งรอบหนึ่งให้ตรงกับวันนี้เสมอ เพื่อให้ทดสอบเส้นทาง "ส่งเงินสด/กู้แทน" ซึ่งขึ้นเฉพาะวันรอบส่งของได้จริง
+    // ตั้งรอบหนึ่งให้ตรงกับวันนี้เสมอ เพื่อให้ทดสอบเส้นทางส่งเงินสดซึ่งขึ้นเฉพาะวันรอบส่งของได้จริง
     delivery_rounds: [
       { id: 'r1', name: 'รอบวันนี้', day_of_week: new Date(TODAY + 'T00:00:00').getDay(), branch_ids: ['lnd', 'bwa', 'nlb'] },
       { id: 'r2', name: 'รอบศุกร์', day_of_week: (new Date(TODAY + 'T00:00:00').getDay() + 3) % 7, branch_ids: ['lnd', 'bwa', 'nlb'] },
@@ -71,17 +71,12 @@ export function makeDb(TODAY) {
     warehouse_stock: stock_items.map(it => ({ item_id: it.id, case_qty: 2, loose_qty: 3, avg_cost: it.branch_price * 0.9, last_checked: d(-3) })),
     purchases: [{ id: 'p1', item_id: 2, purchase_date: d(-5), case_qty: 2, total_price: 2400, cost_per_unit: 100, note: 'บิลทดสอบ', created_by: 'u-rel' }],
     deliveries: [
-      { id: 'dl1', delivery_date: d(-3), branch_id: 'lnd', round_id: 'r1', items: { 2: 3, 3: 4 }, received: { 2: 3, 3: 3 }, packed_by: 'u-rel', received_at: null },
-      { id: 'dl2', delivery_date: d(-3), branch_id: 'bwa', round_id: 'r1', items: { 2: 2 }, received: null, packed_by: 'u-rel', received_at: null },
+      { id: 'dl1', delivery_date: d(-3), branch_id: 'lnd', round_id: 'r1', items: { 2: 3, 3: 4 }, price_snapshot:{2:120,3:45},cost_snapshot:{2:108,3:40.5},received: { 2: 3, 3: 3 }, packed_by: 'u-rel', received_at: null },
+      { id: 'dl2', delivery_date: d(-3), branch_id: 'bwa', round_id: 'r1', items: { 2: 2 }, price_snapshot:{2:120},cost_snapshot:{2:108},received: null, packed_by: 'u-rel', received_at: null },
     ],
-    external_sales: [{ id: 'es1', sale_date: d(-4), buyer: 'ร้านทดสอบ', issuer: 'u-rel', items: [{ item_id: 2, qty: 2, price: 120 }], total: 240, paid: false, edit_log: [] }],
+    external_sales: [{ id: 'es1', sale_date: d(-4), buyer: 'ร้านทดสอบ', issuer: 'u-rel', items: [{ item_id: 2, qty: 2, price: 120, cost:108 }], total: 240, paid: false, edit_log: [] }],
     repairs: [{ id: 'rp1', branch_id: 'lnd', repair_date: d(-2), description: 'ซ่อมเครื่องปั่น', cost: 850 }],
-    advances: [
-      { id: 'a1', branch_id: 'lnd', staff_name: 'ตาล', request_date: d(-2), amount: 1000, type: 'loan', interest: 100, total: 1100, due_date: d(9), source: 'request', repaid: false },
-      { id: 'a2', branch_id: null, staff_name: 'ขวัญ', request_date: d(-3), amount: 500, type: 'loan', interest: 50, total: 550, due_date: d(9), source: 'request', repaid: false },
-    ],
-    cash_remittances: [{ id: 'cr1', branch_id: 'lnd', remit_date: d(-4), amount: 1200, method: 'cash' }],
-    remit_loan_offsets: [{ branch_id: 'lnd', amount: 0 }],
+    cash_remittances: [{ id: 'cr1', branch_id: 'lnd', remit_date: d(-4), through_record_date:d(-4), amount: 1200, method: 'cash',created_at:d(-4)+'T10:00:00Z' }],
     head_remittances: [{ id: 'hr1', remit_date: d(-3), amount: 800, method: 'cash' }],
     day_offs: [{ id: 'do1', off_date: d(3), branch_id: 'bwa' }],
     relief_day_offs: [{ off_date: d(6) }],
@@ -89,8 +84,6 @@ export function makeDb(TODAY) {
     record_edit_history: [],
     settings: [
       { key: 'grab_commission_pct', value: 0.321 },
-      { key: 'advance_cap', value: 4000 }, { key: 'loan_cap', value: 2000 }, { key: 'loan_interest_pct', value: 0.10 },
-      { key: 'advance_day', value: 20 }, { key: 'settle_days', value: [5, 20] },
       { key: 'cup_price', value: { yen: 25, pan: 35 } }, { key: 'cups_per_row', value: { yen: 50, pan: 25 } },
       { key: 'diligence_rules', value: { step: 500, cap: 1500, lateAllowance: 250 } },
       { key: 'holiday_pay_scale', value: [400, 450, 500, 550] }, { key: 'overuse_threshold_units', value: 0.5 },
@@ -162,12 +155,22 @@ export function makeSupabase(db, log = []) {
     return thenable;
   }
   // ฟังก์ชันฝั่งฐานข้อมูล (security definer) ที่โค้ดจริงเรียกผ่าน supabase.rpc()
+  const setUnits=(id,units)=>{const it=db.stock_items.find(x=>x.id===id);const row=db.warehouse_stock.find(x=>x.item_id===id);row.case_qty=Math.floor(units/it.per_case);row.loose_qty=units%it.per_case;};
+  const units=id=>{const it=db.stock_items.find(x=>x.id===id);const row=db.warehouse_stock.find(x=>x.item_id===id);return row.case_qty*it.per_case+row.loose_qty;};
   const rpcs = {
     relief_name: () => ((db.employees || []).find(e => e.role === 'relief' && e.active !== false) || {}).name ?? null,
+    create_external_sale:p=>{let total=0;const lines=p.p_items.map(x=>{const it=db.stock_items.find(i=>i.id===x.item_id);const row=db.warehouse_stock.find(w=>w.item_id===x.item_id);setUnits(it.id,units(it.id)-x.qty);total+=x.qty*it.branch_price;return{item_id:it.id,qty:x.qty,price:it.branch_price,cost:row.avg_cost};});const id='es-'+Math.random().toString(36).slice(2,8);const saleDate=db.clock_records.find(c=>c.id==='c-lnd-0')?.clock_date||'';db.external_sales.push({id,sale_date:saleDate,buyer:p.p_buyer,issuer:'u-own',items:lines,total,paid:false,edit_log:[]});return{id,total};},
+    edit_external_sale:p=>{const sale=db.external_sales.find(x=>x.id===p.p_sale_id);sale.items.forEach(x=>setUnits(x.item_id,units(x.item_id)+x.qty));let total=0;const next=p.p_items.map(x=>{const old=sale.items.find(y=>y.item_id===x.item_id);const it=db.stock_items.find(i=>i.id===x.item_id);const row=db.warehouse_stock.find(w=>w.item_id===x.item_id);setUnits(it.id,units(it.id)-x.qty);const line={item_id:it.id,qty:x.qty,price:old?.price??it.branch_price,cost:old?.cost??row.avg_cost};total+=line.qty*line.price;return line;});sale.edit_log.push({by:p.p_editor_name,from_total:sale.total,to_total:total});sale.items=next;sale.total=total;return{total};},
+    record_warehouse_count:p=>{p.p_counts.forEach(x=>{let row=db.warehouse_stock.find(w=>w.item_id===x.item_id);if(!row){row={item_id:x.item_id,avg_cost:0};db.warehouse_stock.push(row);}row.case_qty=x.case_qty;row.loose_qty=x.loose_qty;});return{updated:p.p_counts.length};},
+    record_store_closure:p=>({id:'closed-'+p.p_branch_id,quota:p.p_reason==='absent'?2:p.p_reason==='approved_leave'?1:0}),
+    set_external_sale_paid:p=>{const sale=db.external_sales.find(x=>x.id===p.p_sale_id);if(sale)sale.paid=p.p_paid;return{paid:p.p_paid};},
+    update_daily_record:p=>{const row=db.daily_records.find(x=>x.id===p.p_record_id);Object.assign(row,p.p_values);return{id:row.id};},
+    owner_update_day_off:p=>({cancelled:p.p_cancel,date:p.p_new_date}),
+    owner_update_closure:()=>({}),owner_cancel_closure:()=>({cancelled:true}),owner_resolve_recount:()=>({}),
   };
-  const rpc = async name => {
+  const rpc = async (name,params={}) => {
     if (!rpcs[name]) return { data: null, error: { message: 'ไม่มีฟังก์ชัน ' + name } };
-    return { data: rpcs[name](), error: null };
+    return { data: rpcs[name](params), error: null };
   };
   return { rpc, from: query, auth: { getUser: async () => ({ data: { user: { id: 'u-own' } } }), signOut: async () => ({}) } };
 }

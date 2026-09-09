@@ -18,28 +18,20 @@ export const CLOSE_REASON_OPTIONS = [
 const closureReason = value => CLOSE_REASON_OPTIONS.find(x => x.value === value) || CLOSE_REASON_OPTIONS[2];
 
 // เก็บเป็น daily record เพื่อให้วันถัดไปดึงยอดเมื่อวานได้ตามปกติ แต่ไม่ใช่วันเปิดขาย
-export async function closeStore({ branchId, dateISO, reason, createdBy }) {
-  const { data: exists, error: existsError } = await supabase.from('daily_records')
-    .select('id').eq('branch_id', branchId).eq('record_date', dateISO).maybeSingle();
-  if (existsError) return { error: existsError.message };
-  if (exists) return { error: 'วันนี้มีรายการปิดยอดอยู่แล้ว จึงแจ้งปิดร้านไม่ได้' };
-  const { data: previous, error: previousError } = await supabase.from('daily_records')
-    .select('*').eq('branch_id', branchId).lt('record_date', dateISO)
-    .order('record_date', { ascending: false }).limit(1);
-  if (previousError) return { error: previousError.message };
-  const prev = previous && previous[0];
-  if (!prev) return { error: 'ยังไม่พบยอดปิดก่อนหน้านี้ จึงคัดลอกยอดแก้วและเงินทอนไม่ได้' };
+export async function closeStore({ branchId, dateISO, reason }) {
   const rule = closureReason(reason);
-  const { error } = await supabase.from('daily_records').insert({
-    branch_id: branchId, record_date: dateISO, staff_name: 'ปิดร้าน',
-    yen: N(prev.yen), yen_add: 0, pan: N(prev.pan), pan_add: 0,
-    cup_own: 0, topping: 0, other: 0, ice: 0, water: 0, etc: 0,
-    cash: N(prev.float_cash), transfer: 0, grab: 0, thaichaithai: 0,
-    float_cash: N(prev.float_cash), stock_snapshot: prev.stock_snapshot || {},
-    sent: true, closed: true, store_closed: true,
-    closure_reason: rule.value, leave_quota_days: rule.quota, created_by: createdBy,
+  const { data, error } = await supabase.rpc('record_store_closure', {
+    p_branch_id: branchId, p_record_date: dateISO, p_reason: rule.value,
   });
-  return error ? { error: error.message } : { reason: rule };
+  return error ? { error: error.message } : { reason: rule, data };
+}
+
+export function updateClosure({ recordId, reason }) {
+  return supabase.rpc('owner_update_closure', { p_record_id: recordId, p_reason: reason });
+}
+
+export function cancelClosure({ recordId, reason }) {
+  return supabase.rpc('owner_cancel_closure', { p_record_id: recordId, p_reason: reason || 'ยกเลิกสถานะปิดร้าน' });
 }
 
 // ฟอร์มปิดยอดที่ยังกรอกไม่เสร็จ — เงินทอนตั้งต้นใช้ค่าที่กรอกไว้ครั้งล่าสุด (ต้นแบบเก็บทับลง b.float หลังส่งยอด
@@ -52,6 +44,18 @@ export function defaultDraft(prev, branch, stockItems) {
     ice: 0, water: 0, etc: 0, cash: '', transfer: 0, grab: 0, thaichaithai: 0,
     float: prev && prev.float_cash != null ? prev.float_cash : branch.float_cash,
     stock,
+  };
+}
+
+export function draftFromRecord(rec, stockItems) {
+  const stock = {};
+  stockItems.forEach(it => { stock[it.id] = rec?.stock_snapshot?.[it.id] ?? 0; });
+  return {
+    yen: N(rec.yen), yenAdd: N(rec.yen_add), pan: N(rec.pan), panAdd: N(rec.pan_add),
+    cupOwn: N(rec.cup_own), topping: N(rec.topping), other: N(rec.other),
+    ice: N(rec.ice), water: N(rec.water), etc: N(rec.etc), cash: N(rec.cash),
+    transfer: N(rec.transfer), grab: N(rec.grab), thaichaithai: N(rec.thaichaithai),
+    float: N(rec.float_cash), stock,
   };
 }
 
@@ -82,7 +86,8 @@ export function closeFormHTML({ draft, errors, prev, cfg, attr, stockItems, intr
       const changed = was != null && Number(cur) !== Number(was);
       return `<div class="stockrow"><div><div class="nm">${esc(it.name)}</div>
         <div class="un">${esc(it.unit)}${was != null ? ` · เมื่อวาน ${was}` : ''}</div></div>
-        <input data-stock="${it.id}" inputmode="decimal" value="${cur}" class="${changed ? 'changed' : ''}"></div>`;
+        <input data-stock="${it.id}" inputmode="decimal" value="${cur}" class="${changed ? 'changed' : ''} ${err[`stock_${it.id}`] ? 'err' : ''}">
+        ${err[`stock_${it.id}`] ? `<div class="errmsg">${esc(err[`stock_${it.id}`])}</div>` : ''}</div>`;
     }).join('');
     return `<div class="card pad">
         <div class="section-t" style="margin-top:0"><h3>สต๊อกวัตถุดิบ</h3><span class="line"></span>
@@ -135,24 +140,60 @@ export function validateClose(d, clock) {
       e[k] = `${nm}เหลือมากกว่าที่มี — นับไว้ตอนเริ่มขาย ${base} + เติม ${N(d[add])} = ${base + N(d[add])} ใบ`;
     }
   });
-  if (N(d.cash) < 0) e.cash = 'เงินสดติดลบไม่ได้';
+  const nonNegative = [
+    ['yen', 'แก้วเย็น'], ['yenAdd', 'แก้วเย็นที่เติม'], ['pan', 'แก้วปั่น'], ['panAdd', 'แก้วปั่นที่เติม'],
+    ['cupOwn', 'รายได้แก้วมาเอง'], ['topping', 'รายได้ไข่มุก/ไซรัป'], ['other', 'รายได้อื่น'],
+    ['ice', 'ค่าน้ำแข็ง'], ['water', 'ค่าน้ำ'], ['etc', 'ค่าใช้จ่ายอื่น'], ['float', 'เงินทอน'],
+    ['cash', 'เงินสด'], ['transfer', 'เงินโอน'], ['grab', 'Grab'], ['thaichaithai', 'ไทยช่วยไทย'],
+  ];
+  nonNegative.forEach(([key, label]) => { if (N(d[key]) < 0) e[key] = `${label}ติดลบไม่ได้`; });
+  ['yen', 'yenAdd', 'pan', 'panAdd'].forEach(key => {
+    if (d[key] !== '' && d[key] != null && !Number.isInteger(N(d[key]))) e[key] = 'จำนวนแก้วต้องเป็นจำนวนเต็ม';
+  });
+  Object.entries(d.stock || {}).forEach(([id, value]) => {
+    if (N(value) < 0) e[`stock_${id}`] = 'จำนวนสต๊อกติดลบไม่ได้';
+  });
   return e;
 }
 
-// บันทึกยอดปิดร้านลงตาราง daily_records — "แถวแก้ว" ในสต๊อก (2 รายการแรก) คิดจากยอดที่นับวันนี้เสมอ
-// ทั้งฝั่งพนักงานและฝั่งหัวหน้า (ต้นแบบทำแบบนี้ใน closeDay) รายการที่เหลือฝั่งหัวหน้าใช้ของเมื่อวานเพราะไม่ได้นับ
-export async function submitClose({ branchId, dateISO, staffName, draft: d, cfg, stockItems, prevSnapshot, createdBy }) {
-  const snap = { ...(prevSnapshot || {}) };
+function stockSnapshot(d, cfg, stockItems, previous) {
+  const snap = { ...(previous || {}) };
   stockItems.forEach((it, i) => {
     if (i === 0) snap[it.id] = Math.floor(N(d.yen) / cfg.cupsPerRow.yen);
     else if (i === 1) snap[it.id] = Math.floor(N(d.pan) / cfg.cupsPerRow.pan);
     else if (d.stock && d.stock[it.id] !== undefined) snap[it.id] = N(d.stock[it.id]);
   });
-  return supabase.from('daily_records').insert({
-    branch_id: branchId, record_date: dateISO, staff_name: staffName,
+  return snap;
+}
+
+function recordValues(d, cfg, stockItems, previous, openYen, openPan, staffName) {
+  const values = {
+    open_yen: N(openYen), open_pan: N(openPan),
     yen: N(d.yen), yen_add: N(d.yenAdd), pan: N(d.pan), pan_add: N(d.panAdd),
     cup_own: N(d.cupOwn), topping: N(d.topping), other: N(d.other), ice: N(d.ice), water: N(d.water), etc: N(d.etc),
     cash: N(d.cash), transfer: N(d.transfer), grab: N(d.grab), thaichaithai: N(d.thaichaithai),
-    float_cash: N(d.float), stock_snapshot: snap, sent: true, closed: true, created_by: createdBy,
+    float_cash: N(d.float), stock_snapshot: stockSnapshot(d, cfg, stockItems, previous),
+    cup_price_yen: N(cfg.cupPrice.yen), cup_price_pan: N(cfg.cupPrice.pan),
+    grab_commission_pct: N(cfg.grabCommissionPct),
+  };
+  if (staffName) values.staff_name = staffName;
+  return values;
+}
+
+// บันทึกยอดปิดร้านลงตาราง daily_records — "แถวแก้ว" ในสต๊อก (2 รายการแรก) คิดจากยอดที่นับวันนี้เสมอ
+// ทั้งฝั่งพนักงานและฝั่งหัวหน้า (ต้นแบบทำแบบนี้ใน closeDay) รายการที่เหลือฝั่งหัวหน้าใช้ของเมื่อวานเพราะไม่ได้นับ
+export async function submitClose({ branchId, dateISO, staffName, draft: d, cfg, stockItems, prevSnapshot, createdBy, openYen, openPan }) {
+  const values = recordValues(d, cfg, stockItems, prevSnapshot, openYen, openPan);
+  return supabase.from('daily_records').insert({
+    branch_id: branchId, record_date: dateISO, staff_name: staffName,
+    ...values, sent: true, closed: true, created_by: createdBy,
+  });
+}
+
+export function updateClose({ recordId, draft: d, cfg, stockItems, prevSnapshot, openYen, openPan, reason, staffName }) {
+  return supabase.rpc('update_daily_record', {
+    p_record_id: recordId,
+    p_values: recordValues(d, cfg, stockItems, prevSnapshot, openYen, openPan, staffName),
+    p_reason: reason || 'แก้ยอดภายในวันเดียวกัน',
   });
 }
