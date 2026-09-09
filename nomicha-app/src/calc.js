@@ -98,7 +98,13 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, tod
   });
   const myClocks = Object.values(clocksByDate).filter(c => c && ofBranch(c.staff_name));
   myClocks.forEach(c => { late += c.late_minutes || 0; early += c.early_minutes || 0; });
-  const noClock = countNoClock(myClocks, workRecords.filter(r => ofBranch(r.staff_name)).map(r => r.record_date), todayISO);
+  // รายการย้อนหลังที่นำเข้าผ่าน SQL ไม่มี created_by และไม่มีหลักฐานเวลาเข้า-ออก
+  // ยังนับยอดขาย/ค่าแก้วตามจริง แต่ไม่สร้างค่าปรับ "ลืมลงเวลา" ขึ้นมาเองจากข้อมูลที่ไฟล์ไม่มี
+  // รายการที่พนักงานหรือเจ้าของบันทึกผ่านแอปมี created_by เสมอ จึงใช้กติกาเดิมครบถ้วน
+  const clockRequiredDates = workRecords
+    .filter(r => ofBranch(r.staff_name) && r.created_by != null)
+    .map(r => r.record_date);
+  const noClock = countNoClock(myClocks, clockRequiredDates, todayISO);
 
   const counted = allDatesInMonth.filter(d => {
     const closure = closureByDate.get(d);
@@ -136,7 +142,9 @@ export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDa
   Object.values(allBranchClocksByDate).forEach(byDate => Object.values(byDate).forEach(c => {
     if (c && c.staff_name === relief.name) myClocks.push(c);
   }));
-  const workedDates = allBranchRecords.filter(r => !r.store_closed && r.staff_name === relief.name).map(r => r.record_date);
+  const workedDates = allBranchRecords
+    .filter(r => !r.store_closed && r.staff_name === relief.name && r.created_by != null)
+    .map(r => r.record_date);
   const noClock = countNoClock(myClocks, workedDates, todayISO);
   const cupPay = cups * cfg.payRules.cupPay;
   const deduct = noClock * cfg.payRules.noClock;   // ไม่มีหักมาสาย/ปิดไว
