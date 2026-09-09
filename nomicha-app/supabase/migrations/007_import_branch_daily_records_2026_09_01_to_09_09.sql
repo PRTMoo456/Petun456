@@ -5,6 +5,8 @@
 -- หมายเหตุจากต้นฉบับ:
 --   * ตัดวันที่ 30 ส.ค. ออกทั้งหมด
 --   * วันที่ 31 ส.ค. เป็นยอดแก้วตั้งต้นของวันที่ 1 ก.ย. ไม่นับยอดขายและไม่สร้าง daily_record
+--   * เก็บยอดเดิมในระบบไว้ให้เจ้าของแก้ 4 รายการ:
+--     เหล่านาดี 8 ก.ย. / บ้านหว้า 8 ก.ย. / บัณฑิต 8 ก.ย. / หนองหลุบ 9 ก.ย.
 --   * ถือว่าวันที่เปิดขายลงเวลาเข้า-ออกตรงตามเวลาทำงานของสาขา
 --     (ถ้ามี clock_record จริงอยู่แล้วจะเก็บของจริงไว้ ไม่เขียนทับ)
 --   * ไฟล์ไม่มีสต๊อกวัตถุดิบ จึงยก stock_snapshot ล่าสุดที่มีอยู่ก่อนหน้าไว้ให้
@@ -106,6 +108,20 @@ insert into _daily_import_source (
   ('nlb', '2026-09-08', 'ปิดร้าน', 376, 121, 376, 0, 121, 0, 0, 0, 0, 0, 0, 0, 200, 0, 0, 0, 200, true, 'approved_leave', 1),
   ('nlb', '2026-09-09', 'อั้ม', 376, 121, 348, 0, 117, 0, 0, 0, 0, 80, 45, 0, 650, 110, 0, 160, 200, false, null, 0);
 
+-- 4 วันนี้มีข้อมูลในระบบแล้ว ให้เก็บไว้ให้เจ้าของแก้จากหน้าโปรแกรม
+-- ไม่ใช้ Excel เขียนทับ แต่ยังเติม clock_record ตามกติกาด้านล่างหากยังไม่มี
+create temporary table _daily_import_preserve_existing (
+  branch_id text not null,
+  record_date date not null,
+  primary key (branch_id, record_date)
+) on commit drop;
+
+insert into _daily_import_preserve_existing (branch_id, record_date) values
+  ('lnd', '2026-09-08'),
+  ('bwa', '2026-09-08'),
+  ('bdt', '2026-09-08'),
+  ('nlb', '2026-09-09');
+
 -- ถ้าเคยรัน migration 007 รุ่นแรก ให้ถอนเฉพาะวันที่ 31 ส.ค. ที่ตรงกับชุดเดิม
 -- ถ้าเป็นรายการจริงที่ผู้ใช้บันทึกเองหรือมีตัวเลขต่างกัน จะหยุดแทนการลบ
 create temporary table _daily_import_old_baseline
@@ -189,6 +205,23 @@ begin
   end if;
 end $$;
 
+-- ต้องพบยอดเดิมครบทั้ง 4 รายการ จึงจะเว้นได้โดยไม่ทำให้วันใดหายไปเงียบ ๆ
+do $$
+declare missing_preserved_rows text;
+begin
+  select string_agg(format('%s/%s', p.branch_id, to_char(p.record_date, 'YYYY-MM-DD')), ', '
+                    order by p.branch_id, p.record_date)
+    into missing_preserved_rows
+  from _daily_import_preserve_existing p
+  left join daily_records d
+    on d.branch_id = p.branch_id and d.record_date = p.record_date
+  where d.id is null;
+
+  if missing_preserved_rows is not null then
+    raise exception 'หยุดนำเข้า: ไม่พบยอดเดิมที่เลือกเว้นไว้ (%). ไม่มีข้อมูลใดถูกเปลี่ยน', missing_preserved_rows;
+  end if;
+end $$;
+
 -- ถ้ามีวันเดิมแต่ตัวเลขต่างกัน ให้หยุดทั้งชุดเพื่อไม่ทับยอดที่ผู้ใช้กรอกไว้
 do $$
 declare conflicts text;
@@ -199,7 +232,12 @@ begin
   from _daily_import_source s
   join daily_records d
     on d.branch_id = s.branch_id and d.record_date = s.record_date
-  where row(
+  where not exists (
+    select 1
+    from _daily_import_preserve_existing p
+    where p.branch_id = s.branch_id and p.record_date = s.record_date
+  )
+    and row(
       d.staff_name, d.open_yen, d.open_pan, d.yen, d.yen_add, d.pan, d.pan_add,
       d.cup_own, d.topping, d.other, d.ice, d.water, d.etc,
       d.cash, d.transfer, d.grab, d.thaichaithai, d.float_cash,
@@ -247,6 +285,11 @@ with added as (
     true, true, s.store_closed, s.closure_reason, s.leave_quota_days,
     s.cup_price_yen, s.cup_price_pan, s.grab_commission_pct
   from _daily_import_source s
+  where not exists (
+    select 1
+    from _daily_import_preserve_existing p
+    where p.branch_id = s.branch_id and p.record_date = s.record_date
+  )
   order by s.branch_id, s.record_date
   on conflict (branch_id, record_date) do nothing
   returning id
@@ -288,11 +331,15 @@ with added as (
 insert into _daily_import_added_clock_ids (id)
 select id from added;
 
--- ผลลัพธ์ที่ SQL Editor แสดง: ยอดขาย 42 วัน และเวลาเข้า-ออกไม่เกิน 41 วัน
+-- ผลลัพธ์ที่ SQL Editor แสดง: ต้นฉบับ 42 รายการ, เว้นยอดเดิม 4 รายการ,
+-- เป้าหมายนำเข้า 38 รายการ และเวลาเข้า-ออกเพิ่มได้ไม่เกิน 41 วัน
 select
   count(*) as source_rows,
+  (select count(*) from _daily_import_preserve_existing) as preserved_owner_rows,
+  count(*) - (select count(*) from _daily_import_preserve_existing) as import_target_rows,
   (select count(*) from _daily_import_added_ids) as inserted_rows,
-  count(*) - (select count(*) from _daily_import_added_ids) as already_matching_rows,
+  count(*) - (select count(*) from _daily_import_preserve_existing)
+    - (select count(*) from _daily_import_added_ids) as already_matching_rows,
   (select count(*) from _daily_import_added_clock_ids) as clock_rows_added,
   min(record_date) as first_date,
   max(record_date) as last_date
