@@ -190,6 +190,9 @@ create table daily_records (
   stock_snapshot jsonb not null default '{}', -- {item_id: qty} ยอดคงเหลือปลายวันของวัตถุดิบ
   sent          boolean not null default false,
   closed        boolean not null default false,
+  store_closed  boolean not null default false, -- วันนั้นไม่ได้เปิดร้าน แต่คงยอดแก้ว/เงินทอนให้ต่อเนื่อง
+  closure_reason text,                          -- approved_leave / absent / owner_or_necessary
+  leave_quota_days int not null default 0 check (leave_quota_days between 0 and 2),
   created_by    uuid references employees(id),
   created_at    timestamptz not null default now(),
   unique (branch_id, record_date)
@@ -411,7 +414,7 @@ create policy self_read_employee_private on employee_private for select using (e
 -- พนักงานสาขา: อ่าน/เขียนเฉพาะข้อมูลสาขาตัวเอง, หัวหน้า+เจ้าของ: เห็นทุกสาขา (หัวหน้าต้องไปแทน/ส่งของทุกสาขา)
 create policy staff_own_branch_records on daily_records for all
   using (auth_role() in ('relief','owner') or branch_id = auth_branch())
-  with check (auth_role() in ('relief','owner') or branch_id = auth_branch());
+  with check (auth_role() in ('relief','owner') or (branch_id = auth_branch() and not store_closed));
 
 create policy staff_own_branch_clock on clock_records for all
   using (auth_role() in ('relief','owner') or branch_id = auth_branch())

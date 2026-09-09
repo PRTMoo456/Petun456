@@ -72,11 +72,12 @@ async function draw(root) {
 
 function shell(ctx) {
   const sentToday = !!(ctx.today && ctx.today.sent);
+  const storeClosed = !!(ctx.today && ctx.today.store_closed);
   let body = S.tab === 'home' ? homeTab(ctx) : S.tab === 'close' ? closeTab(ctx) : meTab(ctx);
   return `<div id="staffHead">
       <div class="app-head">
         <div><h1>${esc(ME.name)}</h1><div class="sub">สาขา${esc(BRANCH.name)} · ${fmtDate(TODAY)}</div></div>
-        <span class="pill ${sentToday ? 'ok' : 'wait'}">${sentToday ? 'ส่งยอดแล้ว' : 'ยังไม่ส่งยอด'}</span>
+        <span class="pill ${storeClosed ? 'warn' : sentToday ? 'ok' : 'wait'}">${storeClosed ? 'ปิดร้าน' : sentToday ? 'ส่งยอดแล้ว' : 'ยังไม่ส่งยอด'}</span>
       </div>
     </div>
     <div id="staffBody">${body}</div>
@@ -128,6 +129,19 @@ function homeTab(ctx) {
 
   const round = isRoundOn(ctx.rounds, TODAY);
   const dlv = round ? ctx.deliveries.find(x => x.round_id === round.id) : null;
+
+  if (today && today.store_closed) return `
+    <div class="card pad" style="border-left:3px solid var(--amber);margin-bottom:14px">
+      <div class="between"><div class="eyebrow">วันนี้ปิดร้าน</div><span class="pill warn">ปิดร้าน</span></div>
+      <p class="sub" style="margin:8px 0 0">เจ้าของหรือหัวหน้าบันทึกปิดร้านแล้ว วันนี้ไม่ต้องลงเวลาและไม่ต้องปิดยอด ระบบเก็บยอดแก้วและเงินทอนต่อจากเมื่อวานไว้ให้แล้ว</p>
+    </div>
+    <div class="card pad">
+      <div class="eyebrow" style="margin-bottom:4px">จองวันหยุด</div>
+      <p class="sub" style="margin:0 0 10px">จองล่วงหน้าได้ 14 วัน · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง · โควตานับแยกเป็นรายเดือน</p>
+      <div class="daygrid">${dayChips}</div>
+      ${OFF_LEGEND}
+      ${quotaHTML(report, BRANCH.days_off_quota)}
+    </div>`;
 
   return `
     <div class="card pad clockcard" style="margin-bottom:14px">
@@ -414,6 +428,7 @@ async function loadMeTab(ctx) {
         <div class="payrow"><span>เบี้ยขยัน${pr.reset ? ' <span class="sub" style="color:var(--bad)">— โดนรีเซ็ตเดือนนี้</span>' : ''}</span><span class="n">${baht(pr.diligence)}</span></div>
         ${pr.holidayPay ? `<div class="payrow"><span>ค่าทำงานวันหยุด</span><span class="n">${baht(pr.holidayPay)}</span></div>` : ''}
         <div class="payrow"><span>ค่าแก้ว (${pr.cups} ใบ)</span><span class="n">${baht(pr.cupPay)}</span></div>
+        <div class="payrow"><span>ใช้โควตาวันหยุด</span><span class="n">${pr.daysOffTaken} / ${BRANCH.days_off_quota} วัน</span></div>
         ${pr.deduct ? `<div class="payrow neg"><span>หัก สาย ${pr.late} น. / ปิดไว ${pr.early} น.${pr.noClock ? ` / ลืมลงเวลา ${pr.noClock} ครั้ง` : ''}${pr.excess ? ` / หยุดเกิน ${pr.excess} วัน` : ''}</span><span class="n">−${baht(pr.deduct)}</span></div>` : ''}
         ${pr.advanceDeduct ? `<div class="payrow neg"><span>หักเบิกล่วงหน้า/เงินกู้ค้างอยู่</span><span class="n">−${baht(pr.advanceDeduct)}</span></div>` : ''}
       </div>

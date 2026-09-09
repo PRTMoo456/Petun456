@@ -8,6 +8,7 @@ import { futureDates } from '../dayoff.js';
 import { whAvailMap, issueExternalSale, editExternalSale } from '../warehouse.js';
 import { loadPeople, peopleCardHTML, bindPeopleCard } from './people.js';
 import { getCompanies, deliveryReportHTML, deliveryMonthHTML, externalBillHTML, externalMonthHTML, staffSlipHTML, reliefSlipHTML, printDoc } from '../print.js';
+import { CLOSE_REASON_OPTIONS, closeStore } from '../close.js';
 import * as calc from '../calc.js';
 
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
@@ -77,6 +78,10 @@ async function renderToday(body) {
 
   const cards = recs.map(({ b, r, cc }) => {
     if (!cc) return `<div class="bcard pending" data-gob="${b.id}" style="cursor:pointer"><div class="between"><h4>${esc(b.name)}</h4><span class="pill wait">ยังไม่ส่ง</span></div><div class="sub">รอปิดยอด</div></div>`;
+    if (r.store_closed) {
+      const rule = CLOSE_REASON_OPTIONS.find(x => x.value === r.closure_reason);
+      return `<div class="bcard pending" data-gob="${b.id}" style="cursor:pointer"><div class="between"><h4>${esc(b.name)}</h4><span class="pill warn">ปิดร้าน</span></div><div class="sub">${esc(rule ? rule.label : 'ไม่ระบุสาเหตุ')}</div></div>`;
+    }
     const bad = Math.abs(cc.variance) >= 50;
     return `<div class="bcard ${bad ? 'alert' : ''}" data-gob="${b.id}" style="cursor:pointer">
       <div class="between"><h4>${esc(b.name)}</h4>
@@ -146,6 +151,7 @@ async function renderDay(body) {
   const sum = { yenAdd: 0, panAdd: 0, extraIn: 0, expense: 0, expectedTotal: 0, cash: 0, tf: 0, grab: 0, tct: 0, days: 0 };
   days.forEach(d => {
     const r = recByDate[d]; if (!r || !r.sent) { missing++; return; }
+    if (r.store_closed) return;
     const c = calc.calcDay(r, clocksByDate[d], cfg);
     sumSales += c.income - c.expense; sumCups += c.cups; sumVar += c.variance; sum.days++;
     sum.yenAdd += N(r.yen_add); sum.panAdd += N(r.pan_add); sum.extraIn += N(r.cup_own) + N(r.topping) + N(r.other);
@@ -155,6 +161,10 @@ async function renderDay(body) {
   const rows = days.map(d => {
     const r = recByDate[d];
     if (!r || !r.sent) return `<tr><td>${fmtDate(d)}</td><td colspan="14" style="text-align:left;color:var(--muted)">ยังไม่ส่งยอด</td></tr>`;
+    if (r.store_closed) {
+      const rule = CLOSE_REASON_OPTIONS.find(x => x.value === r.closure_reason);
+      return `<tr><td>${fmtDate(d)}</td><td colspan="14" style="text-align:left"><span class="pill warn">ปิดร้าน</span> <span class="sub">${esc(rule ? rule.label : 'ไม่ระบุสาเหตุ')}</span></td></tr>`;
+    }
     const c = calc.calcDay(r, clocksByDate[d], cfg);
     const ed = (edits || []).filter(e => e.record_id === r.id);
     const editing = S.editing === r.id;
@@ -362,6 +372,14 @@ async function renderSched(body) {
       <span class="seg2">${months.map(m => `<button data-schedmonth="${m.mk}" aria-pressed="${m.mk === curMk}">${esc(m.label)}</button>`).join('')}</span>
     </div>
     <div class="card pad" style="margin-bottom:16px">
+      <div class="between" style="margin-bottom:10px"><h3 style="margin:0">แจ้งปิดร้าน</h3><span class="sub">เลือกได้ทุกสาขาและทุกวัน</span></div>
+      <div class="field"><label>สาขา</label><select id="closeBranch" class="ctl">${BRANCHES.map(b => `<option value="${b.id}">สาขา${esc(b.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>วันที่ปิดร้าน</label><input type="date" id="closeDate" value="${TODAY}"></div>
+      <div class="field"><label>สาเหตุ</label><select id="closeReason" class="ctl">${CLOSE_REASON_OPTIONS.map(r => `<option value="${r.value}">${esc(r.label)} — หักโควตาวันหยุด ${r.quota} วัน</option>`).join('')}</select></div>
+      <button class="btn primary" id="closeStoreBtn">บันทึกปิดร้าน</button>
+      <p class="sub" style="margin:8px 0 0">คัดลอกยอดแก้ว สต๊อก และเงินทอนจากวันก่อนหน้า โดยยอดขายเป็นศูนย์</p>
+    </div>
+    <div class="card pad" style="margin-bottom:16px">
       <h3 style="margin-bottom:8px">โควตาวันหยุดที่จองแล้ว</h3>
       ${quota}
       <div class="setrow" style="border-top:1px solid var(--line-2);margin-top:2px;padding-top:10px">
@@ -374,6 +392,13 @@ async function renderSched(body) {
     <p class="foot">วันหนึ่งให้หยุดได้สาขาเดียว เพราะมีหัวหน้าคนเดียว — พนักงานและหัวหน้าจองเองในแอป ระบบกันวันซ้ำให้ ·
       <b>วันส่งของห้ามใครหยุด</b> ระบบกันไว้ให้ตั้งแต่ตอนจอง · แสดงเฉพาะวันที่อยู่ในช่วง 31 วันข้างหน้าของเดือนนั้น</p>`;
   body.querySelectorAll('[data-schedmonth]').forEach(btn => btn.addEventListener('click', () => { S.schedMonth = btn.dataset.schedmonth; renderSched(body); }));
+  $('#closeStoreBtn').addEventListener('click', async () => {
+    const result = await closeStore({ branchId: $('#closeBranch').value, dateISO: $('#closeDate').value,
+      reason: $('#closeReason').value, createdBy: ME.id });
+    if (result.error) { toast('บันทึกปิดร้านไม่สำเร็จ: ' + result.error); return; }
+    toast(`บันทึกปิดร้านแล้ว — ${result.reason.label} (หักโควตา ${result.reason.quota} วัน)`);
+    renderSched(body);
+  });
 }
 
 /* ============================== สต๊อก ============================== */
@@ -615,7 +640,7 @@ async function renderPay(body) {
       <td class="n ${p.pr.reset ? 'neg' : ''}">${baht(p.pr.diligence)}${p.pr.reset ? ' ⚠' : ''}</td>
       <td class="n">${baht(p.pr.holidayPay)}</td>
       <td class="n" title="${p.pr.cups} แก้ว">${baht(p.pr.cupPay)}</td>
-      <td class="n ${p.pr.deduct ? 'neg' : ''}" title="${[p.pr.late ? `สาย ${p.pr.late} นาที` : '', p.pr.early ? `ปิดไว ${p.pr.early} นาที` : '', p.pr.noClock ? `ลืมลงเวลา ${p.pr.noClock} ครั้ง` : '', p.pr.excess ? `หยุดเกินโควตา ${p.pr.excess} วัน` : ''].filter(Boolean).join(' · ') || 'ไม่มีรายการหัก'}">${p.pr.deduct ? '−' + baht(p.pr.deduct) : '0'}${p.pr.noClock ? ` <span class="sub">(ลืมลงเวลา ${p.pr.noClock})</span>` : ''}</td>
+      <td class="n ${p.pr.deduct ? 'neg' : ''}" title="${[p.pr.daysOffTaken ? `ใช้วันหยุด ${p.pr.daysOffTaken}/${p.b.days_off_quota} วัน` : '', p.pr.late ? `สาย ${p.pr.late} นาที` : '', p.pr.early ? `ปิดไว ${p.pr.early} นาที` : '', p.pr.noClock ? `ลืมลงเวลา ${p.pr.noClock} ครั้ง` : '', p.pr.excess ? `หยุดเกินโควตา ${p.pr.excess} วัน` : ''].filter(Boolean).join(' · ') || 'ไม่มีรายการหัก'}">${p.pr.deduct ? '−' + baht(p.pr.deduct) : '0'}${p.pr.noClock ? ` <span class="sub">(ลืมลงเวลา ${p.pr.noClock})</span>` : ''}</td>
       <td class="n" style="font-weight:600">${baht(p.pr.total + p.pr.advanceDeduct)}</td></tr>`).join('');
   const reliefBaseAll = (relief?.base_salary ?? 0) + (relief?.delivery_pay ?? 0) + prR.whRent;
   const reliefRow = `<tr><td>${esc(relief?.name || 'หัวหน้า')} <span class="sub">คลังกลาง</span></td>

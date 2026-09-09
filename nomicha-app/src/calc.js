@@ -80,6 +80,11 @@ export function earlyMinutes(timeOut, workEnd) {
 // พอร์ตจาก calc() — คำนวณยอดขาย/รายจ่าย/เงินสดที่ควรมีของ 1 วัน จาก record จริง + clock ของวันเดียวกัน (open_yen/open_pan)
 export function calcDay(rec, clock, cfg) {
   if (!rec) return null;
+  if (rec.store_closed) {
+    const float = N(rec.float_cash);
+    return { cupYen: 0, cupPan: 0, cups: 0, income: 0, expense: 0,
+      expectedTotal: float, variance: N(rec.cash) - float };
+  }
   const openYen = clock ? clock.open_yen : null, openPan = clock ? clock.open_pan : null;
   const cupYen = openYen != null ? (openYen + N(rec.yen_add) - N(rec.yen)) : 0;
   const cupPan = openPan != null ? (openPan + N(rec.pan_add) - N(rec.pan)) : 0;
@@ -122,8 +127,10 @@ function countNoClock(clockRows, workedDates, todayISO) {
    (เจ้าของเลือกไว้ 5 ก.ย. 69 — ถ้าเปลี่ยนคนกลางเดือน ยอดยังรวมเป็นก้อนเดียวของสาขา ไม่แยกตามชื่อคน) */
 export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, advancesForStaff, todayISO, cfg }) {
   const ofBranch = n => !branch.relief_name || n !== branch.relief_name;   // ทุกคนที่ไม่ใช่หัวหน้า = คนของสาขา
+  const workRecords = records.filter(r => !r.store_closed);
+  const closureByDate = new Map(records.filter(r => r.store_closed).map(r => [r.record_date, r]));
   let cups = 0, late = 0, early = 0;
-  records.forEach(r => {
+  workRecords.forEach(r => {
     if (ofBranch(r.staff_name) && r.sent) {
       const c = calcDay(r, clocksByDate[r.record_date], cfg);
       cups += c ? c.cups : 0;
@@ -131,11 +138,16 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, adv
   });
   const myClocks = Object.values(clocksByDate).filter(c => c && ofBranch(c.staff_name));
   myClocks.forEach(c => { late += c.late_minutes || 0; early += c.early_minutes || 0; });
-  const noClock = countNoClock(myClocks, records.filter(r => ofBranch(r.staff_name)).map(r => r.record_date), todayISO);
+  const noClock = countNoClock(myClocks, workRecords.filter(r => ofBranch(r.staff_name)).map(r => r.record_date), todayISO);
 
-  const counted = allDatesInMonth.filter(d => d < todayISO || records.some(r => r.record_date === d) || clocksByDate[d]);
-  const worked = counted.filter(d => records.some(r => r.record_date === d && ofBranch(r.staff_name))).length;
-  const daysOffTaken = Math.max(0, counted.length - worked);
+  const counted = allDatesInMonth.filter(d => {
+    const closure = closureByDate.get(d);
+    if (closure && N(closure.leave_quota_days) === 0) return false;
+    return d < todayISO || records.some(r => r.record_date === d) || clocksByDate[d];
+  });
+  const worked = counted.filter(d => workRecords.some(r => r.record_date === d && ofBranch(r.staff_name))).length;
+  const closurePenalty = [...closureByDate.values()].reduce((sum, r) => sum + Math.max(0, N(r.leave_quota_days) - 1), 0);
+  const daysOffTaken = Math.max(0, counted.length - worked) + closurePenalty;
   const excess = Math.max(0, daysOffTaken - branch.days_off_quota);
   const reset = (late + early) > cfg.diligenceRules.lateAllowance || excess > 0;
   const dilBase = Math.min(cfg.diligenceRules.cap, cfg.diligenceRules.step * 3);
@@ -147,7 +159,7 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, adv
   const deduct = late * R.latePerMin + early * R.earlyPerMin + noClock * R.noClock + excess * R.excessDayOff;
   const advBreak = advBreakdown(advancesForStaff, todayISO, cfg.advanceDay);
   const total = branch.base_salary + diligence + holidayPay + cupPay - deduct - advBreak.total;
-  return { cups, late, early, noClock, excess, reset, diligence, holidayPay, cupPay, deduct, advBreak, total, advanceDeduct: advBreak.total };
+  return { cups, late, early, noClock, daysOffTaken, excess, reset, diligence, holidayPay, cupPay, deduct, advBreak, total, advanceDeduct: advBreak.total };
 }
 
 /* พอร์ตจาก payrollForRelief() — เงินเดือนหัวหน้า (ไม่ผูกสาขาเดียว วนดูทุกสาขาที่ไปแทน)
@@ -156,7 +168,7 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, adv
 export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDate, advancesForRelief, todayISO, cfg, whRent }) {
   let cups = 0;
   allBranchRecords.forEach(r => {
-    if (r.sent && r.staff_name === relief.name) {
+    if (!r.store_closed && r.sent && r.staff_name === relief.name) {
       const c = calcDay(r, allBranchClocksByDate[r.branch_id]?.[r.record_date], cfg);
       cups += c ? c.cups : 0;
     }
@@ -165,7 +177,7 @@ export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDa
   Object.values(allBranchClocksByDate).forEach(byDate => Object.values(byDate).forEach(c => {
     if (c && c.staff_name === relief.name) myClocks.push(c);
   }));
-  const workedDates = allBranchRecords.filter(r => r.staff_name === relief.name).map(r => r.record_date);
+  const workedDates = allBranchRecords.filter(r => !r.store_closed && r.staff_name === relief.name).map(r => r.record_date);
   const noClock = countNoClock(myClocks, workedDates, todayISO);
   const cupPay = cups * cfg.payRules.cupPay;
   const deduct = noClock * cfg.payRules.noClock;   // ไม่มีหักมาสาย/ปิดไว

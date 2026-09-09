@@ -6,7 +6,7 @@ import { $, N, numIn, baht, esc, toast, todayISO, nowHM, fmtDate, monthKey, mont
 import { loadRefs } from '../refs.js';
 import { quotaReport, dayChip, OFF_LEGEND, quotaHTML, futureDates } from '../dayoff.js';
 import { getCompanies, reliefSlipHTML, externalBillHTML, printDoc } from '../print.js';
-import { defaultDraft, closeFormHTML, validateClose, submitClose } from '../close.js';
+import { defaultDraft, closeFormHTML, validateClose, submitClose, CLOSE_REASON_OPTIONS, closeStore } from '../close.js';
 import { verifyForClock } from '../geo.js';
 import { whAvailMap, issueExternalSale } from '../warehouse.js';
 import * as calc from '../calc.js';
@@ -82,7 +82,9 @@ async function renderSched(body) {
     const off = dayOffs.find(x => x.off_date === d);
     const b = BRANCHES.find(x => x.id === off.branch_id);
     return `<tr><td class="n">${fmtDate(d)} <span class="sub">${DAYS[new Date(d + 'T00:00:00').getDay()]}</span></td>
-      <td><b>สาขา${esc(b ? b.name : off.branch_id)}</b>${staffOf(off.branch_id) ? ` <span class="sub">(${esc(staffOf(off.branch_id))} หยุด)</span>` : ''}${d === TODAY ? ' <span class="pill warn">วันนี้</span>' : ''}</td></tr>`;
+      <td><b>สาขา${esc(b ? b.name : off.branch_id)}</b>${staffOf(off.branch_id) ? ` <span class="sub">(${esc(staffOf(off.branch_id))} หยุด)</span>` : ''}${d === TODAY ? ' <span class="pill warn">วันนี้</span>' : ''}
+      ${d === TODAY ? `<div style="margin-top:7px"><select class="ctl" data-relief-close-reason="${off.branch_id}">${CLOSE_REASON_OPTIONS.map(r => `<option value="${r.value}" ${r.value === 'approved_leave' ? 'selected' : ''}>${esc(r.label)} — หัก ${r.quota} วัน</option>`).join('')}</select>
+        <button class="mini" data-relief-close="${off.branch_id}">ปิดร้านวันนี้</button></div>` : ''}</td></tr>`;
   }).join('');
 
   const rReport = quotaReport(myOffDates, win14, ME.days_off_quota ?? 2);
@@ -116,6 +118,14 @@ async function renderSched(body) {
     </div>
   </div>`;
   body.querySelectorAll('.daychip[data-roff]').forEach(chip => chip.addEventListener('click', () => toggleReliefOff(chip.dataset.roff, dayOffs || [])));
+  body.querySelectorAll('[data-relief-close]').forEach(btn => btn.addEventListener('click', async () => {
+    const branchId = btn.dataset.reliefClose;
+    const reason = body.querySelector(`[data-relief-close-reason="${branchId}"]`).value;
+    const result = await closeStore({ branchId, dateISO: TODAY, reason, createdBy: ME.id });
+    if (result.error) { toast('บันทึกปิดร้านไม่สำเร็จ: ' + result.error); return; }
+    toast(`บันทึกปิดร้านแล้ว — หักโควตาวันหยุด ${result.reason.quota} วัน`);
+    renderSched(body);
+  }));
 }
 
 async function toggleReliefOff(dateISO, dayOffs) {

@@ -9,6 +9,39 @@
 import { supabase } from './supabaseClient.js';
 import { N, esc } from './util.js';
 
+export const CLOSE_REASON_OPTIONS = [
+  { value: 'approved_leave', label: 'พนักงานหยุด/ลาและอนุมัติแล้ว', quota: 1 },
+  { value: 'absent', label: 'พนักงานขาดงาน', quota: 2 },
+  { value: 'owner_or_necessary', label: 'เจ้าของสั่งปิด / ร้านมีเหตุจำเป็น', quota: 0 },
+];
+
+const closureReason = value => CLOSE_REASON_OPTIONS.find(x => x.value === value) || CLOSE_REASON_OPTIONS[2];
+
+// เก็บเป็น daily record เพื่อให้วันถัดไปดึงยอดเมื่อวานได้ตามปกติ แต่ไม่ใช่วันเปิดขาย
+export async function closeStore({ branchId, dateISO, reason, createdBy }) {
+  const { data: exists, error: existsError } = await supabase.from('daily_records')
+    .select('id').eq('branch_id', branchId).eq('record_date', dateISO).maybeSingle();
+  if (existsError) return { error: existsError.message };
+  if (exists) return { error: 'วันนี้มีรายการปิดยอดอยู่แล้ว จึงแจ้งปิดร้านไม่ได้' };
+  const { data: previous, error: previousError } = await supabase.from('daily_records')
+    .select('*').eq('branch_id', branchId).lt('record_date', dateISO)
+    .order('record_date', { ascending: false }).limit(1);
+  if (previousError) return { error: previousError.message };
+  const prev = previous && previous[0];
+  if (!prev) return { error: 'ยังไม่พบยอดปิดก่อนหน้านี้ จึงคัดลอกยอดแก้วและเงินทอนไม่ได้' };
+  const rule = closureReason(reason);
+  const { error } = await supabase.from('daily_records').insert({
+    branch_id: branchId, record_date: dateISO, staff_name: 'ปิดร้าน',
+    yen: N(prev.yen), yen_add: 0, pan: N(prev.pan), pan_add: 0,
+    cup_own: 0, topping: 0, other: 0, ice: 0, water: 0, etc: 0,
+    cash: N(prev.float_cash), transfer: 0, grab: 0, thaichaithai: 0,
+    float_cash: N(prev.float_cash), stock_snapshot: prev.stock_snapshot || {},
+    sent: true, closed: true, store_closed: true,
+    closure_reason: rule.value, leave_quota_days: rule.quota, created_by: createdBy,
+  });
+  return error ? { error: error.message } : { reason: rule };
+}
+
 // ฟอร์มปิดยอดที่ยังกรอกไม่เสร็จ — เงินทอนตั้งต้นใช้ค่าที่กรอกไว้ครั้งล่าสุด (ต้นแบบเก็บทับลง b.float หลังส่งยอด
 // ระบบจริงอ่านจากยอดปิดล่าสุดแทน ได้ผลเหมือนกันโดยไม่ต้องให้พนักงานมีสิทธิ์แก้ข้อมูลสาขา)
 export function defaultDraft(prev, branch, stockItems) {
