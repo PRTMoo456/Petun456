@@ -197,6 +197,31 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log(`✓ ค่าแก้ววันที่หัวหน้าไปทำแทน (${reliefCups} ใบ) เข้าเงินเดือนหัวหน้า ไม่ใช่ของพนักงานประจำสาขา`);
 }
 
+// 4.4 ยอดย้อนหลังที่นำเข้าจาก Excel ไม่มีเวลาเข้า-ออก ต้องไม่สร้างค่าปรับขึ้นมาเอง
+// แต่ยอดที่บันทึกผ่านแอป (มี created_by) และไม่มี clock ยังต้องหักตามกติกาเดิม
+{
+  const importedDate = isoDate(new Date(new Date(TODAY + 'T00:00:00').getTime() - 86400000));
+  const appDate = isoDate(new Date(new Date(TODAY + 'T00:00:00').getTime() - 172800000));
+  const base = {
+    branch_id: 'lnd', staff_name: 'ตาล', open_yen: 20, open_pan: 10,
+    yen: 10, yen_add: 0, pan: 5, pan_add: 0, cup_price_yen: 25, cup_price_pan: 35,
+    cup_own: 0, topping: 0, other: 0, ice: 0, water: 0, etc: 0,
+    cash: 0, transfer: 0, grab: 0, thaichaithai: 0, float_cash: 300,
+    sent: true, closed: true, store_closed: false,
+  };
+  const pr = calc.payrollFor({
+    branch: { relief_name: 'ขวัญ', base_salary: 0, days_off_quota: 31, holiday_work_days: 0 },
+    records: [
+      { ...base, id: 'imported', record_date: importedDate, created_by: null },
+      { ...base, id: 'app', record_date: appDate, created_by: 'u-lnd' },
+    ],
+    clocksByDate: {}, allDatesInMonth: [appDate, importedDate], todayISO: TODAY, cfg,
+  });
+  check('ยอดนำเข้าย้อนหลังไม่โดนหักลืมลงเวลา', pr.noClock === 1,
+    `ควรหักเฉพาะยอดจากแอป 1 ครั้ง แต่ระบบนับ ${pr.noClock} ครั้ง`);
+  console.log('✓ ยอด Excel ย้อนหลังไม่สร้างค่าปรับลืมลงเวลา · ยอดจากแอปยังใช้กติกาเดิม');
+}
+
 // 4.5 ปฏิทินจองวันหยุด ต้องเริ่มที่ "พรุ่งนี้" และไม่มีวันซ้ำ
 {
   const { futureDates } = await import('../src/dayoff.js');
