@@ -44,7 +44,7 @@ async function draw(root) {
   }
   root.innerHTML = `<div class="wrap phone" id="staffRoot"><div class="boot">กำลังโหลดข้อมูลวันนี้…</div></div>`;
   const box = $('#staffRoot');
-  const future = futureDates(TODAY, 31).slice(0, 14);
+  const future = futureDates(TODAY, 28);
   const monthStart = TODAY.slice(0, 8) + '01';
 
   const [
@@ -117,17 +117,19 @@ function homeTab(ctx) {
     const roundOnD = isRoundOn(ctx.rounds, d);
     const round = !!roundOnD;
     const headOff = ctx.reliefOffs.includes(d);
-    const blocked = round || headOff;
+    const tooSoon = d < ctx.future[2];
+    const blocked = round || headOff || (tooSoon && !mine);
     const full = monthFull.get(monthLabel(d)) || false;
     const newMonth = d === ctx.future.find(x => monthKey(x) === monthKey(d));
-    const cls = round ? 'round' : mine ? 'mine' : otherId ? 'taken' : blocked ? 'round' : full ? 'full' : 'free';
+    const cls = round ? 'round' : mine ? 'mine' : otherId ? 'taken' : tooSoon ? 'too-soon' : blocked ? 'round' : full ? 'full' : 'free';
     const otherName = otherId ? (ctx.branchNames[otherId] || otherId) : '';
     const title = round ? `วันส่งของ (${roundOnD.name}) — ห้ามหยุด`
       : headOff ? 'หัวหน้าหยุดวันนี้แล้ว ไม่มีคนมาแทน'
       : otherId ? `สาขา${otherName} จองวันนี้ไปแล้ว`
+      : tooSoon && !mine ? 'ต้องจองล่วงหน้าอย่างน้อย 3 วัน'
       : full && !mine ? `ครบโควตาของเดือน ${monthLabel(d)} แล้ว` : '';
     const tag = round ? '<span class="dt">ส่งของ</span>' : otherId ? `<span class="dt">${esc(otherName)}</span>`
-      : mine ? '<span class="dt">หยุด</span>' : cls === 'free' ? '<span class="dt ok">ว่าง</span>' : '';
+      : mine ? '<span class="dt">หยุด</span>' : tooSoon ? '<span class="dt">จองไม่ทัน</span>' : cls === 'free' ? '<span class="dt ok">ว่าง</span>' : '';
     return dayChip(d, 'off', cls, otherId || blocked || (full && !mine), title, tag, newMonth);
   }).join('');
 
@@ -141,7 +143,7 @@ function homeTab(ctx) {
     </div>
     <div class="card pad">
       <div class="eyebrow" style="margin-bottom:4px">จองวันหยุด</div>
-      <p class="sub" style="margin:0 0 10px">จองล่วงหน้าได้ 14 วัน · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง · โควตานับแยกเป็นรายเดือน</p>
+      <p class="sub" style="margin:0 0 10px">ต้องจองล่วงหน้าอย่างน้อย 3 วัน และเลือกได้ถึง 28 วันข้างหน้า · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง · โควตานับแยกเป็นรายเดือน</p>
       <div class="daygrid">${dayChips}</div>
       ${OFF_LEGEND}
       ${quotaHTML(report, BRANCH.days_off_quota)}
@@ -169,7 +171,7 @@ function homeTab(ctx) {
 
     <div class="card pad">
       <div class="eyebrow" style="margin-bottom:4px">จองวันหยุด</div>
-      <p class="sub" style="margin:0 0 10px">จองล่วงหน้าได้ 14 วัน · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง · โควตานับแยกเป็นรายเดือน</p>
+      <p class="sub" style="margin:0 0 10px">ต้องจองล่วงหน้าอย่างน้อย 3 วัน และเลือกได้ถึง 28 วันข้างหน้า · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง · โควตานับแยกเป็นรายเดือน</p>
       <div class="daygrid">${dayChips}</div>
       ${OFF_LEGEND}
       ${quotaHTML(report, BRANCH.days_off_quota)}
@@ -558,6 +560,9 @@ async function doToggleOff(dateISO, ctx) {
     if (error) { toast('ยกเลิกวันหยุดไม่สำเร็จ: ' + error.message); return; }
     toast('ยกเลิกวันหยุด ' + fmtDate(dateISO));
     await draw($('#roleRoot')); return;
+  }
+  if (dateISO < ctx.future[2] || dateISO > ctx.future[ctx.future.length - 1]) {
+    toast('ต้องจองล่วงหน้าอย่างน้อย 3 วัน และไม่เกิน 28 วัน'); return;
   }
   const rd = isRoundOn(ctx.rounds, dateISO);
   if (rd) { toast(`วันส่งของ (${rd.name}) ห้ามหยุด`); return; }
