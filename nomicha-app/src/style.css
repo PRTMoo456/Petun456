@@ -217,6 +217,8 @@ tr.editing td,tr.editing td:first-child{background:var(--brand-soft)}
 .daychip.taken{background:var(--surface-2);opacity:.55;cursor:not-allowed}
 .daychip.round{background:var(--surface-2);opacity:.5;cursor:not-allowed}
 .daychip.round .dt{color:var(--muted)}
+.daychip.too-soon{background:var(--surface-2);opacity:.5;cursor:not-allowed}
+.daychip.too-soon .dd,.daychip.too-soon .dw,.daychip.too-soon .dt{color:var(--muted)}
 .daychip.full{opacity:.4;cursor:not-allowed}
 
 .legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:11.5px;color:var(--muted)}
