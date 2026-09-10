@@ -74,7 +74,7 @@ function roundDate(r) {
 /* ============================== ตารางงาน ============================== */
 async function renderSched(body) {
   const future = futureDates(TODAY, 31);
-  const win14 = future.slice(0, 14);
+  const win28 = future.slice(0, 28);
   const [{ data: dayOffs }, { data: myOffs }, { data: staffRows }] = await Promise.all([
     supabase.from('day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
     supabase.from('relief_day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
@@ -92,18 +92,19 @@ async function renderSched(body) {
         <button class="mini" data-relief-close="${off.branch_id}">ปิดร้านวันนี้</button></div>` : ''}</td></tr>`;
   }).join('');
 
-  const rReport = quotaReport(myOffDates, win14, ME.days_off_quota ?? 2);
+  const rReport = quotaReport(myOffDates, win28, ME.days_off_quota ?? 2);
   const rMonthFull = new Map(rReport.map(r => [r.label, r.used >= (ME.days_off_quota ?? 2)]));
-  const offChips = win14.map(d => {
+  const offChips = win28.map(d => {
     const mine = myOffDates.includes(d);
     const round = !!isRoundOn(d);
     const covering = (dayOffs || []).some(x => x.off_date === d);
-    const blocked = round || covering;
+    const tooSoon = d < win28[2];
+    const blocked = round || covering || (tooSoon && !mine);
     const full = rMonthFull.get(monthLabel(d)) || false;
-    const newMonth = d === win14.find(x => monthKey(x) === monthKey(d));
-    const cls = round ? 'round' : mine ? 'mine' : blocked ? 'round' : full ? 'full' : 'free';
-    const title = round ? 'วันส่งของ — ห้ามหยุด' : covering ? 'ต้องไปทำแทนสาขาที่จองไว้' : full && !mine ? `ครบโควตาของเดือน ${monthLabel(d)} แล้ว` : '';
-    const tag = round ? '<span class="dt">ส่งของ</span>' : covering ? '<span class="dt">ไปแทน</span>' : mine ? '<span class="dt">หยุด</span>' : cls === 'free' ? '<span class="dt ok">ว่าง</span>' : '';
+    const newMonth = d === win28.find(x => monthKey(x) === monthKey(d));
+    const cls = round ? 'round' : mine ? 'mine' : tooSoon ? 'too-soon' : blocked ? 'round' : full ? 'full' : 'free';
+    const title = round ? 'วันส่งของ — ห้ามหยุด' : covering ? 'ต้องไปทำแทนสาขาที่จองไว้' : tooSoon && !mine ? 'ต้องจองล่วงหน้าอย่างน้อย 3 วัน' : full && !mine ? `ครบโควตาของเดือน ${monthLabel(d)} แล้ว` : '';
+    const tag = round ? '<span class="dt">ส่งของ</span>' : covering ? '<span class="dt">ไปแทน</span>' : mine ? '<span class="dt">หยุด</span>' : tooSoon ? '<span class="dt">จองไม่ทัน</span>' : cls === 'free' ? '<span class="dt ok">ว่าง</span>' : '';
     return dayChip(d, 'roff', cls, blocked || (full && !mine), title, tag, newMonth);
   }).join('');
 
@@ -116,7 +117,7 @@ async function renderSched(body) {
     </div>
     <div class="card pad">
       <div class="eyebrow" style="margin-bottom:4px">จองวันหยุดของคุณ</div>
-      <p class="sub" style="margin:0 0 10px">จองล่วงหน้าได้ 14 วัน · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง</p>
+      <p class="sub" style="margin:0 0 10px">ต้องจองล่วงหน้าอย่างน้อย 3 วัน และเลือกได้ถึง 28 วันข้างหน้า · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง</p>
       <div class="daygrid">${offChips}</div>
       ${OFF_LEGEND}
       ${quotaHTML(rReport, ME.days_off_quota ?? 2)}
@@ -136,11 +137,15 @@ async function renderSched(body) {
 async function toggleReliefOff(dateISO, dayOffs) {
   const { data: cur } = await supabase.from('relief_day_offs').select('*').eq('off_date', dateISO).maybeSingle();
   if (cur) { await supabase.from('relief_day_offs').delete().eq('off_date', dateISO); toast('ยกเลิกวันหยุด ' + fmtDate(dateISO)); await draw($('#roleRoot')); return; }
+  const bookingDates = futureDates(TODAY, 28);
+  if (dateISO < bookingDates[2] || dateISO > bookingDates[bookingDates.length - 1]) {
+    toast('ต้องจองล่วงหน้าอย่างน้อย 3 วัน และไม่เกิน 28 วัน'); return;
+  }
   const rd2 = isRoundOn(dateISO);
   if (rd2) { toast(`วันส่งของ (${rd2.name}) ห้ามหยุด`); return; }
   const covering = dayOffs.some(x => x.off_date === dateISO);
   if (covering) { toast('วันนี้ต้องไปทำแทนสาขาที่จองไว้แล้ว'); return; }
-  const future = futureDates(TODAY, 31).slice(0, 14);
+  const future = futureDates(TODAY, 28);
   const { data: myOffs } = await supabase.from('relief_day_offs').select('*').gte('off_date', future[0]).lte('off_date', future[future.length - 1]);
   const used = (myOffs || []).filter(x => monthKey(x.off_date) === monthKey(dateISO)).length;
   if (used >= (ME.days_off_quota ?? 2)) { toast(`จองครบ ${ME.days_off_quota ?? 2} วันของเดือน ${monthLabel(dateISO)} แล้ว`); return; }
