@@ -4,9 +4,8 @@ import { $, toast } from './util.js';
 // พนักงานล็อกอินด้วย "ชื่อผู้ใช้ + รหัสผ่าน" ที่เจ้าของตั้งให้ในหน้า จัดการสาขา
 // เบื้องหลัง Supabase Auth บังคับให้บัญชีเป็นรูปแบบอีเมล ระบบจึงต่อ "@nomicha.local" ให้เองอัตโนมัติ
 // (ไม่มีการส่งอีเมลจริง โดเมนนี้ไม่มีอยู่จริง ใช้เป็นรูปแบบชื่อบัญชีเท่านั้น)
-export const LOGIN_DOMAIN = 'nomicha.local';
+const LOGIN_DOMAIN = 'nomicha.local';
 export const userToEmail = u => `${String(u || '').trim().toLowerCase()}@${LOGIN_DOMAIN}`;
-export const emailToUser = e => String(e || '').split('@')[0];
 // ชื่อผู้ใช้ต้องเป็นตัวอักษรอังกฤษ/ตัวเลขเท่านั้น เพราะต้องเอาไปประกอบเป็นอีเมลให้ Supabase ยอมรับ
 export const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{2,29}$/;
 
