@@ -10,7 +10,7 @@ import { supabase } from './supabaseClient.js';
 import { N, esc } from './util.js';
 
 export const CLOSE_REASON_OPTIONS = [
-  { value: 'approved_leave', label: 'พนักงานหยุด/ลาและอนุมัติแล้ว', quota: 1 },
+  { value: 'approved_leave', label: 'หยุดส่วนตัว (ไม่มีคนแทน)', quota: 1 },
   { value: 'absent', label: 'พนักงานขาดงาน', quota: 2 },
   { value: 'owner_or_necessary', label: 'เจ้าของสั่งปิด / ร้านมีเหตุจำเป็น', quota: 0 },
 ];
@@ -18,6 +18,8 @@ export const CLOSE_REASON_OPTIONS = [
 const closureReason = value => CLOSE_REASON_OPTIONS.find(x => x.value === value) || CLOSE_REASON_OPTIONS[2];
 
 // เก็บเป็น daily record เพื่อให้วันถัดไปดึงยอดเมื่อวานได้ตามปกติ แต่ไม่ใช่วันเปิดขาย
+// สำหรับ approved_leave ระบบฐานข้อมูลจะคัดลอกแก้วคงเหลือ สต๊อก และเงินทอนจากวันก่อนหน้า
+// พร้อมบันทึกรายได้/รายจ่าย/โอน/Grab เป็น 0 จึงไม่สร้างยอดขายปลอมในวันหยุด
 export async function closeStore({ branchId, dateISO, reason }) {
   const rule = closureReason(reason);
   const { data, error } = await supabase.rpc('record_store_closure', {
