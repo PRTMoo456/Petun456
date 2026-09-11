@@ -74,11 +74,11 @@ function countNoClock(clockRows, workedDates, todayISO) {
   const seen = new Set();
   clockRows.forEach(c => {
     seen.add(c.clock_date);
-    if (c.clock_date >= todayISO) return;               // วันนี้ยังไม่จบ ยังไม่ถือว่าลืม
-    if (c.no_clock) { n++; return; }                    // เจ้าของทำเครื่องหมายไว้เอง
-    if (!c.time_in || !c.time_out) n++;                 // ลงเวลาไม่ครบ (ขาดเข้า หรือขาดออก)
+    if (c.clock_date >= todayISO) return;
+    if (c.no_clock) { n++; return; }
+    if (!c.time_in || !c.time_out) n++;
   });
-  workedDates.forEach(d => { if (d < todayISO && !seen.has(d)) n++; });  // เปิดร้านขายทั้งวันแต่ไม่มีการลงเวลาเลย
+  workedDates.forEach(d => { if (d < todayISO && !seen.has(d)) n++; });
   return n;
 }
 
@@ -86,7 +86,7 @@ function countNoClock(clockRows, workedDates, todayISO) {
    records/clocks = ทุกแถวของสาขานั้นในเดือนนั้น ฟังก์ชันกรองเอง: นับทุกแถวของสาขา ยกเว้นวันที่หัวหน้ามาทำแทน
    (เจ้าของเลือกไว้ 5 ก.ย. 69 — ถ้าเปลี่ยนคนกลางเดือน ยอดยังรวมเป็นก้อนเดียวของสาขา ไม่แยกตามชื่อคน) */
 export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, todayISO, cfg }) {
-  const ofBranch = n => !branch.relief_name || n !== branch.relief_name;   // ทุกคนที่ไม่ใช่หัวหน้า = คนของสาขา
+  const ofBranch = n => !branch.relief_name || n !== branch.relief_name;
   const workRecords = records.filter(r => !r.store_closed);
   const closureByDate = new Map(records.filter(r => r.store_closed).map(r => [r.record_date, r]));
   let cups = 0, late = 0, early = 0;
@@ -111,7 +111,14 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, tod
     if (closure && N(closure.leave_quota_days) === 0) return false;
     return d < todayISO || records.some(r => r.record_date === d) || clocksByDate[d];
   });
-  const worked = counted.filter(d => workRecords.some(r => r.record_date === d && ofBranch(r.staff_name))).length;
+  // daily_records ที่เจ้าของเพิ่ม/แก้ย้อนหลังเป็นข้อมูลยอด ไม่ใช่หลักฐานว่าพนักงานมาทำงาน
+  // รายการที่สร้างผ่านแอปต้องมี clock ของคนสาขาในวันนั้นจึงนับเป็นทำงาน
+  // ส่วนข้อมูลเก่าที่ import จาก SQL (created_by = null) ยังคงนับตาม record เพื่อไม่ทำให้ประวัติเก่าเพี้ยน
+  const worked = counted.filter(d => {
+    const clock = clocksByDate[d];
+    if (clock && ofBranch(clock.staff_name)) return true;
+    return workRecords.some(r => r.record_date === d && ofBranch(r.staff_name) && r.created_by == null);
+  }).length;
   const closurePenalty = [...closureByDate.values()].reduce((sum, r) => sum + Math.max(0, N(r.leave_quota_days) - 1), 0);
   const daysOffTaken = Math.max(0, counted.length - worked) + closurePenalty;
   const excess = Math.max(0, daysOffTaken - branch.days_off_quota);
@@ -147,7 +154,7 @@ export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDa
     .map(r => r.record_date);
   const noClock = countNoClock(myClocks, workedDates, todayISO);
   const cupPay = cups * cfg.payRules.cupPay;
-  const deduct = noClock * cfg.payRules.noClock;   // ไม่มีหักมาสาย/ปิดไว
+  const deduct = noClock * cfg.payRules.noClock;
   const total = relief.base_salary + relief.delivery_pay + whRent + cupPay - deduct;
   return { cups, noClock, deduct, cupPay, whRent, total, diligence: 0, holidayPay: 0, reset: false, late: 0, early: 0 };
 }
