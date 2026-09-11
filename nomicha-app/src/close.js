@@ -199,3 +199,66 @@ export function updateClose({ recordId, draft: d, cfg, stockItems, prevSnapshot,
     p_reason: reason || 'แก้ยอดภายในวันเดียวกัน',
   });
 }
+
+/* ============================== วันหยุดไม่มีคนแทน ==============================
+   เจ้าของเคยต้องกรอกยอดของเมื่อวานซ้ำเอง เพราะแถววันหยุดไม่แสดงค่าที่ carry forward
+   กติกาใหม่: เมื่อวันหยุดผ่านไปแล้วและไม่มี clock-in ของคนแทน ระบบฐานข้อมูลจะปรับวันนั้นเป็น
+   "หยุดส่วนตัว (ไม่มีคนแทน)" อัตโนมัติ แล้วคัดลอกแก้ว/สต๊อก/เงินทอนจากวันก่อนหน้า
+   ส่วนยอดขาย เงินโอน Grab และรายจ่ายเป็น 0
+
+   ตัวตรวจนี้ทำงานเฉพาะหน้าเจ้าของ และเรียก RPC แบบ idempotent เพียงครั้งเดียวต่อการโหลดหน้า
+   ถ้ามีรายการที่ถูกปรับจริง จะ reload 1 ครั้งเพื่อให้ยอดรวม/เงินเดือน/กำไรขาดทุนอ่าน record ใหม่ทั้งชุด */
+let ownerLeaveSyncStarted = false;
+
+async function syncPastUnstaffedLeaveDays() {
+  if (ownerLeaveSyncStarted) return;
+  ownerLeaveSyncStarted = true;
+  const { data, error } = await supabase.rpc('owner_reconcile_unstaffed_leave_days');
+  // ช่วงที่หน้าเว็บ deploy ก่อน migration DB ไม่ให้รบกวนการใช้งานเดิม
+  if (error) return;
+  if (N(data?.changed) > 0 && typeof window !== 'undefined') window.location.reload();
+}
+
+// แถวปิดร้านเดิมยุบเป็นข้อความอย่างเดียว ทำให้เจ้าของคิดว่าค่าแก้ว/เงินทอนหาย
+// เติมสรุปค่าที่ carry forward ลงในแถวเดิม โดยไม่แก้ DOM ของปุ่มจัดการปิดร้าน
+async function decorateClosureCarryRows(root) {
+  const selects = [...root.querySelectorAll('select[data-closurechoice]')];
+  await Promise.all(selects.map(async sel => {
+    const cell = sel.closest('td');
+    if (!cell || cell.querySelector('[data-carry-summary]')) return;
+    const recordId = sel.dataset.closurechoice;
+    const { data: rec, error } = await supabase.from('daily_records')
+      .select('id,closure_reason,yen,pan,float_cash')
+      .eq('id', recordId).maybeSingle();
+    if (error || !rec || cell.querySelector('[data-carry-summary]')) return;
+    const line = document.createElement('div');
+    line.dataset.carrySummary = '1';
+    line.className = 'sub';
+    line.style.marginTop = '6px';
+    line.style.fontWeight = '600';
+    const title = rec.closure_reason === 'approved_leave' ? 'หยุดส่วนตัว — ไม่มีคนแทน' : 'ยกยอดจากวันก่อน';
+    line.textContent = `${title} · แก้วเย็น ${N(rec.yen)} · แก้วปั่น ${N(rec.pan)} · เงินทอน ${N(rec.float_cash)} · ยอดขาย/โอน/Grab/รายจ่าย 0`;
+    cell.appendChild(line);
+  }));
+}
+
+function initOwnerLeaveEnhancer() {
+  if (typeof document === 'undefined') return;
+  let tries = 0;
+  const timer = window.setInterval(() => {
+    tries += 1;
+    const ownerTabs = document.querySelector('.owner-tabs');
+    const ownBody = document.querySelector('#ownBody');
+    if (!ownerTabs || !ownBody) {
+      if (tries >= 40) window.clearInterval(timer);
+      return;
+    }
+    window.clearInterval(timer);
+    syncPastUnstaffedLeaveDays();
+    decorateClosureCarryRows(ownBody);
+    const observer = new MutationObserver(() => decorateClosureCarryRows(ownBody));
+    observer.observe(ownBody, { childList: true, subtree: true });
+  }, 150);
+}
+
+if (typeof window !== 'undefined' && typeof MutationObserver !== 'undefined') initOwnerLeaveEnhancer();
