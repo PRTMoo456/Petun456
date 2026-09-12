@@ -322,11 +322,6 @@ function closeTab(ctx) {
 function renderCloseForm({ clock, prev, today }) {
   const d = S.draft || (S.draft = today && S.editingToday ? draftFromRecord(today, STOCK_ITEMS) : defaultDraft(prev, BRANCH, STOCK_ITEMS));
   return `<div class="stack">
-      ${S.editingToday ? `<div class="card pad"><div class="eyebrow">ยอดแก้วตอนเริ่มขาย</div>
-        <p class="sub" style="margin:6px 0 10px">แก้ส่วนนี้ได้หากตอนเริ่มวันกดตัวเลขผิด ระบบจะคำนวณยอดขายใหม่ให้</p>
-        <div class="field"><label>แก้วเย็นตอนเริ่มขาย</label><input id="editOpenYen" inputmode="numeric" value="${S.openDraft?.yen ?? clock.open_yen ?? 0}"></div>
-        <div class="field"><label>แก้วปั่นตอนเริ่มขาย</label><input id="editOpenPan" inputmode="numeric" value="${S.openDraft?.pan ?? clock.open_pan ?? 0}"></div>
-      </div>` : ''}
       ${closeFormHTML({ draft: d, errors: S.errors, prev, cfg: getSettings(), attr: 'f', stockItems: STOCK_ITEMS })}
       ${S.editingToday ? '<button class="btn primary big" id="sendBtn">บันทึกยอดที่แก้</button><button class="btn big" id="cancelTodayEditBtn">ยกเลิกการแก้ไข</button>'
         : '<button class="btn primary big" id="sendBtn">ส่งยอด</button>'}
@@ -433,8 +428,6 @@ function wireEvents(box, ctx) {
   const cancelTodayEdit = $('#cancelTodayEditBtn'); if (cancelTodayEdit) cancelTodayEdit.addEventListener('click', () => {
     S.editingToday = false; S.draft = null; S.openDraft = null; S.errors = {}; draw($('#roleRoot'));
   });
-  const editOpenYen = $('#editOpenYen'); if (editOpenYen) editOpenYen.addEventListener('input', () => { S.openDraft.yen = numIn(editOpenYen.value); });
-  const editOpenPan = $('#editOpenPan'); if (editOpenPan) editOpenPan.addEventListener('input', () => { S.openDraft.pan = numIn(editOpenPan.value); });
 
   box.querySelectorAll('input[data-f]').forEach(inp => {
     inp.addEventListener('input', () => { S.draft[inp.dataset.f] = numIn(inp.value); });
