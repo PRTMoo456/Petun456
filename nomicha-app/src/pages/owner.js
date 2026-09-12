@@ -10,12 +10,12 @@ import { loadPeople, peopleCardHTML, bindPeopleCard } from './people.js';
 import { getCompanies, deliveryReportHTML, deliveryMonthHTML, externalBillHTML, externalMonthHTML, staffSlipHTML, reliefSlipHTML, printDoc } from '../print.js';
 import { CLOSE_REASON_OPTIONS, closeStore, closeFormHTML, defaultDraft, draftFromRecord, validateClose, submitClose, updateClose, updateClosure, cancelClosure } from '../close.js';
 import * as calc from '../calc.js';
-
+ 
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
 let monthPayrollCache = null;
 let tabLoadTicket = 0;
 let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
-
+ 
 export async function renderOwnerApp(root, me) {
   ME = me; TODAY = todayISO();
   const refs = await loadRefs();
@@ -24,7 +24,7 @@ export async function renderOwnerApp(root, me) {
   if (!S.stockBranch) S.stockBranch = BRANCHES[0]?.id;
   await draw(root);
 }
-
+ 
 async function draw(root) {
   TODAY = todayISO();
   const tabs = [['today', 'ภาพรวมวันนี้'], ['day', 'สรุปยอดสาขา'], ['sched', 'ตารางงาน'], ['stock', 'สต๊อก'], ['pay', 'เงินเดือน'], ['pl', 'กำไร/ขาดทุน'], ['set', 'ตั้งค่า']];
@@ -38,7 +38,7 @@ async function draw(root) {
   }));
   await loadTab();
 }
-
+ 
 function selectOwnerTab(tab) {
   S.tab = tab;
   document.querySelectorAll('[data-otab]').forEach(btn => {
@@ -46,7 +46,7 @@ function selectOwnerTab(tab) {
   });
   return loadTab();
 }
-
+ 
 async function loadTab() {
   const body = $('#ownBody'); if (!body) return;
   const ticket=++tabLoadTicket,tab=S.tab;
@@ -59,15 +59,23 @@ async function loadTab() {
   else await renderSet(body);
   if(ticket!==tabLoadTicket) return loadTab();
 }
-
+ 
 /* ============================== ภาพรวมวันนี้ ============================== */
 async function renderToday(body) {
   body.innerHTML = `<div class="boot">กำลังโหลด…</div>`;
   const cfg = getSettings();
-  const [{ data: records }, { data: clocks }, { data: pendingRC }] = await Promise.all([
+  const monthStart = TODAY.slice(0, 8) + '01';
+  // เผื่อสาขาไหนเริ่มนับเงินสดค้างส่งก่อนต้นเดือนนี้ ต้องดึงย้อนไปให้ถึงจุดนั้นด้วย ไม่ใช่แค่เดือนนี้
+  const rangeStart = BRANCHES.reduce((m, b) => {
+    const v = b.cash_tracking_from || monthStart;
+    return v < m ? v : m;
+  }, monthStart);
+  const [{ data: records }, { data: clocks }, { data: pendingRC }, { data: rangeRecords }, { data: remits }] = await Promise.all([
     supabase.from('daily_records').select('*').eq('record_date', TODAY),
     supabase.from('clock_records').select('*').eq('clock_date', TODAY),
     supabase.from('recount_requests').select('*').eq('status', 'pending'),
+    supabase.from('daily_records').select('*').eq('sent', true).gte('record_date', rangeStart),
+    supabase.from('cash_remittances').select('branch_id,remit_date,through_record_date,created_at').order('created_at', { ascending: false }),
   ]);
   const recs = BRANCHES.map(b => {
     const r = (records || []).find(x => x.branch_id === b.id);
@@ -79,8 +87,26 @@ async function renderToday(body) {
   const totalSales = sent.reduce((s, x) => s + x.cc.income - x.cc.expense, 0);
   const totalCups = sent.reduce((s, x) => s + x.cc.cups, 0);
   const flags = sent.filter(x => Math.abs(x.cc.variance) >= 50);
-  const totalVar = sent.reduce((s, x) => s + x.cc.variance, 0);
-
+ 
+  // ยอดขาย/แก้วสะสมของเดือนนี้ ทุกสาขารวมกัน (จากยอดที่ส่งแล้วเท่านั้น)
+  let monthSales = 0, monthCups = 0;
+  (rangeRecords || []).forEach(r => {
+    if (r.record_date < monthStart) return;
+    const c = calc.calcDay(r, null, cfg);
+    if (c) { monthSales += c.income - c.expense; monthCups += c.cups; }
+  });
+ 
+  // เงินสดค้างส่งหัวหน้าของแต่ละสาขา ณ ตอนนี้ (สูตรเดียวกับที่พนักงานเห็นในหน้าของตัวเอง — calc.cashPending)
+  const lastRemitByBranch = {};
+  (remits || []).forEach(rm => { if (!lastRemitByBranch[rm.branch_id]) lastRemitByBranch[rm.branch_id] = rm; });
+  const cashPendingByBranch = {};
+  BRANCHES.forEach(b => {
+    const branchRecs = (rangeRecords || []).filter(r => r.branch_id === b.id && r.record_date >= (b.cash_tracking_from || rangeStart));
+    const lastRemit = lastRemitByBranch[b.id];
+    const cutoff = lastRemit ? (lastRemit.through_record_date || lastRemit.remit_date) : null;
+    cashPendingByBranch[b.id] = calc.cashPending(branchRecs, cutoff).amount;
+  });
+ 
   const cards = recs.map(({ b, r, cc }) => {
     if (!cc) return `<div class="bcard pending" data-gob="${b.id}" style="cursor:pointer"><div class="between"><h4>${esc(b.name)}</h4><span class="pill wait">ยังไม่ส่ง</span></div><div class="sub">รอปิดยอด</div></div>`;
     if (r.store_closed) {
@@ -89,13 +115,13 @@ async function renderToday(body) {
     }
     const bad = Math.abs(cc.variance) >= 50;
     return `<div class="bcard ${bad ? 'alert' : ''}" data-gob="${b.id}" style="cursor:pointer">
-      <div class="between"><h4>${esc(b.name)}</h4>
+      <div class="between"><h4>${esc(b.name)} · ${esc(r.staff_name)}</h4>
         ${cc.variance === 0 ? '<span class="pill ok">ตรง</span>' : `<span class="pill ${bad ? 'bad' : 'warn'}">${cc.variance < 0 ? 'ขาด' : 'เกิน'} ${baht(Math.abs(cc.variance))}</span>`}</div>
       <div class="money">${baht(cc.income - cc.expense)} <span class="sub" style="font-size:12px">บาท</span></div>
-      <div class="meta"><span>${esc(r.staff_name)}</span><span>${cc.cups} แก้ว</span></div>
+      <div class="meta"><span>ค้างส่ง ${baht(cashPendingByBranch[b.id] || 0)} บาท</span><span>${cc.cups} แก้ว</span></div>
     </div>`;
   }).join('');
-
+ 
   body.innerHTML = `${(pendingRC || []).length ? `<div class="card pad" style="border-left:3px solid var(--bad);margin-bottom:16px">
       <div class="eyebrow">⚠ คำขอตรวจสอบยอดแก้ว (${pendingRC.length})</div>
       <p class="sub" style="margin:6px 0 10px">นับแก้วก่อนเริ่มขายแล้วไม่ตรงกับยอดปิดเมื่อวาน — ${pendingRC.map(r => {
@@ -105,10 +131,9 @@ async function renderToday(body) {
     </div>` : ''}
     <div class="kpis">
       <div class="card kpi"><div class="eyebrow">ยอดขายรวมวันนี้</div><div class="v">${baht(totalSales)}</div></div>
-      <div class="card kpi"><div class="eyebrow">แก้วรวม</div><div class="v">${baht(totalCups)}</div></div>
-      <div class="card kpi"><div class="eyebrow">ส่งยอดแล้ว</div><div class="v">${sent.length} / ${BRANCHES.length}</div></div>
-      <div class="card kpi ${flags.length ? 'flag' : ''}"><div class="eyebrow">สาขาที่ต้องดู</div><div class="v">${flags.length}</div></div>
-      <div class="card kpi ${totalVar < 0 ? 'flag' : ''}"><div class="eyebrow">ผลต่างเงินสดรวม</div><div class="v">${signed(totalVar)}</div></div>
+      <div class="card kpi"><div class="eyebrow">ยอดขายรวมเดือนนี้</div><div class="v">${baht(monthSales)}</div></div>
+      <div class="card kpi"><div class="eyebrow">แก้วรวมวันนี้</div><div class="v">${baht(totalCups)}</div></div>
+      <div class="card kpi"><div class="eyebrow">แก้วรวมเดือนนี้</div><div class="v">${baht(monthCups)}</div></div>
     </div>
     ${flags.length ? `<div class="note" style="margin-bottom:16px"><b>ต้องตรวจ</b> — ${flags.map(f => esc(f.b.name) + ' ' + (f.cc.variance < 0 ? 'ขาด ' : 'เกิน ') + baht(Math.abs(f.cc.variance))).join(' · ')}</div>` : ''}
     <div class="bcards">${cards}</div>
@@ -122,7 +147,7 @@ async function renderToday(body) {
     selectOwnerTab('day');
   }));
 }
-
+ 
 /* ============================== สรุปยอดสาขา (แก้ย้อนหลัง) ============================== */
 function dateRange(days) {
   const out = []; const d0 = new Date(TODAY + 'T00:00:00');
@@ -131,7 +156,7 @@ function dateRange(days) {
   for (let i = 0; i < n; i++) { const d = new Date(d0); d.setDate(d0.getDate() - i); out.push(isoDate(d)); }
   return out; // วันนี้ก่อน ไล่ย้อนหลัง
 }
-
+ 
 async function renderDay(body) {
   body.innerHTML = `<div class="boot">กำลังโหลด…</div>`;
   const cfg = getSettings();
@@ -156,7 +181,7 @@ async function renderDay(body) {
     ? await supabase.from('record_edit_history').select('*').in('record_id', recordIds).order('edited_at', { ascending: false })
     : { data: [] };
   const dateOfRec = {}; (records || []).forEach(r => { dateOfRec[r.id] = r.record_date; });
-
+ 
   let sumSales = 0, sumCups = 0, sumVar = 0, missing = 0;
   const sum = { yenAdd: 0, panAdd: 0, extraIn: 0, expense: 0, expectedTotal: 0, cash: 0, tf: 0, grab: 0, tct: 0, days: 0 };
   days.forEach(d => {
@@ -167,7 +192,7 @@ async function renderDay(body) {
     sum.yenAdd += N(r.yen_add); sum.panAdd += N(r.pan_add); sum.extraIn += N(r.cup_own) + N(r.topping) + N(r.other);
     sum.expense += c.expense; sum.expectedTotal += c.expectedTotal; sum.cash += N(r.cash); sum.tf += N(r.transfer); sum.grab += N(r.grab); sum.tct += N(r.thaichaithai);
   });
-
+ 
   const rows = days.map(d => {
     const r = recByDate[d];
     if (!r || !r.sent) return `<tr><td>${fmtDate(d)}</td><td colspan="14" style="text-align:left;color:var(--muted)">ยังไม่ส่งยอด <button class="mini" data-addhist="${d}">+ เพิ่มยอดย้อนหลัง</button></td></tr>`;
@@ -207,7 +232,7 @@ async function renderDay(body) {
       <td class="n" style="font-weight:600">${c.cups}</td>
       <td class="n ${vc}">${signed(c.variance)} <button class="mini" data-edit="${r.id}" title="แก้ตัวเลขหลัก">แก้ด่วน</button> <button class="mini" data-fulledit="${r.id}">แก้ทั้งหมด</button></td></tr>`;
   }).join('');
-
+ 
   const fullRec = (records || []).find(r => r.id === S.fullEditing);
   const editCard = fullRec && S.fullDraft ? `<div class="card pad" id="ownerEditCard" style="margin-bottom:16px;border-left:3px solid var(--brand)">
       <div class="between"><h3 style="margin:0">แก้ยอดทั้งหมด · ${fmtDate(fullRec.record_date)}</h3><button class="mini" id="ownerFullCancel">ปิด</button></div>
@@ -218,7 +243,7 @@ async function renderDay(body) {
       ${closeFormHTML({ draft:S.fullDraft, errors:{}, prev:null, cfg, attr:'of', stockItems:STOCK_ITEMS, intro:'ตรวจและแก้ได้ทุกช่อง ระบบคำนวณใหม่พร้อมเก็บประวัติ' })}
       <div class="field"><label>เหตุผลที่แก้</label><input id="ownerEditReason" value="แก้ข้อมูลที่กรอกผิด"></div>
       <button class="btn primary big" id="ownerFullSave">บันทึกและคำนวณใหม่</button></div>` : '';
-
+ 
   const addCard = S.addingDate && S.addDraft ? `<div class="card pad" id="ownerAddCard" style="margin-bottom:16px;border-left:3px solid var(--amber)">
       <div class="between"><h3 style="margin:0">เพิ่มยอดย้อนหลัง · ${fmtDate(S.addingDate)}</h3><button class="mini" id="ownerAddCancel">ปิด</button></div>
       <p class="sub">ระบบใช้ราคาปัจจุบันเป็นราคาของรายการใหม่นี้อัตโนมัติ ไม่ต้องกรอกราคาเอง</p>
@@ -227,7 +252,7 @@ async function renderDay(body) {
       <div class="field"><label>แก้วปั่นตั้งต้น</label><input id="ownerAddOpenPan" inputmode="numeric" value="${S.addOpen?.pan ?? 0}"></div></div>
       ${closeFormHTML({ draft:S.addDraft, errors:{}, prev:S.addPrev, cfg, attr:'oa', stockItems:STOCK_ITEMS, intro:'สร้างรายการเฉพาะวันที่ขาดหาย เจ้าของตรวจแล้วบันทึกได้โดยตรง' })}
       <button class="btn primary big" id="ownerAddSave">บันทึกยอดย้อนหลัง</button></div>` : '';
-
+ 
   const rcCard = (pendingRC || []).length ? `<div class="card pad" style="border-left:3px solid var(--bad);margin-bottom:16px">
       <div class="eyebrow">⚠ คำขอตรวจสอบยอดแก้ว</div>
       ${pendingRC.map(r => `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
@@ -242,7 +267,7 @@ async function renderDay(body) {
   const rcLogRows = (rcLogAll || []).map(r => `<div class="logline"><span class="sub">${fmtDate(r.request_date)}</span>
     ยอดนับแก้ว: ${r.old_yen}/${r.old_pan} → ${r.new_yen}/${r.new_pan}
     ${r.status === 'approved' ? '<b>อนุมัติ — บันทึกทับแล้ว</b>' : `<b>ไม่อนุมัติ</b> (ส่วนต่าง ${signed(r.value_diff)} บาท)`}</div>`).join('');
-
+ 
   body.innerHTML = `${rcCard}${editCard}${addCard}<div class="between" style="margin-bottom:14px;flex-wrap:wrap">
       <span class="row">
         <select id="bviewSel" class="ctl">${BRANCHES.map(x => `<option value="${x.id}" ${x.id === b.id ? 'selected' : ''}>สาขา${esc(x.name)}</option>`).join('')}</select>
@@ -278,7 +303,7 @@ async function renderDay(body) {
         || '<tr><td colspan="3" class="sub">ยังไม่เคยแก้ยอดของสาขานี้ในช่วงที่เลือก</td></tr>'}</tbody></table></div>
     <p class="foot">เก็บทุกครั้งที่แก้ยอดย้อนหลัง ใครแก้ แก้อะไร จากเท่าไรเป็นเท่าไร — ใช้ตรวจย้อนหลังได้ว่าตัวเลขเปลี่ยนเพราะอะไร</p>
     ${rcLogRows ? `<div class="card pad" style="margin-top:16px"><div class="eyebrow">ประวัติคำขอตรวจสอบยอดแก้ว</div><div style="margin-top:8px">${rcLogRows}</div></div>` : ''}`;
-
+ 
   $('#bviewSel').addEventListener('change', e => {
     S.viewBranch=e.target.value;S.editing=null;S.fullEditing=null;S.fullDraft=null;S.addingDate=null;S.addDraft=null;loadTab();
   });
@@ -312,9 +337,9 @@ async function renderDay(body) {
   body.querySelectorAll('[data-approverc]').forEach(btn => btn.addEventListener('click', () => approveRecount(btn.dataset.approverc)));
   body.querySelectorAll('[data-rejectrc]').forEach(btn => btn.addEventListener('click', () => rejectRecount(btn.dataset.rejectrc)));
 }
-
+ 
 const FIELD_TH = { yen: 'แก้วเย็น', yen_add: 'เพิ่มแก้วเย็น', pan: 'แก้วปั่น', pan_add: 'เพิ่มแก้วปั่น', cash: 'ยอดเงินสด', transfer: 'เงินโอน', grab: 'แกร๊บ', thaichaithai: 'ไทยช่วยไทย' };
-
+ 
 // พอร์ตจาก saveEdit() — ตรวจความเป็นไปได้ทางกายภาพก่อนบันทึกเสมอ แล้วจดประวัติการแก้ไข
 async function saveEdit(recordId, cfg) {
   const { data: rec } = await supabase.from('daily_records').select('*').eq('id', recordId).single();
@@ -327,7 +352,7 @@ async function saveEdit(recordId, cfg) {
   if (neg) { toast(`${FIELD_TH[neg]} ติดลบไม่ได้`); return; }
   if (baseYen != null && nv('yen') > baseYen + nv('yen_add')) { toast(`แก้วเย็นเหลือมากกว่าที่มี — ตั้งต้น ${baseYen} + เติม ${nv('yen_add')} = ${baseYen + nv('yen_add')} ใบ`); return; }
   if (basePan != null && nv('pan') > basePan + nv('pan_add')) { toast(`แก้วปั่นเหลือมากกว่าที่มี — ตั้งต้น ${basePan} + เติม ${nv('pan_add')} = ${basePan + nv('pan_add')} ใบ`); return; }
-
+ 
   const patch = {};
   Object.keys(d).forEach(f => {
     if (d[f] === '' || d[f] == null) return;
@@ -344,7 +369,7 @@ async function saveEdit(recordId, cfg) {
   S.editing = null; S.editDraft = {};
   loadTab();
 }
-
+ 
 function wireOwnerCloseForm(body,{records,cfg,b,branchPeople}) {
   const editCard=$('#ownerEditCard');
   if(editCard){
@@ -385,7 +410,7 @@ function wireOwnerCloseForm(body,{records,cfg,b,branchPeople}) {
     });
   }
 }
-
+ 
 async function approveRecount(id) {
   const { data: req } = await supabase.from('recount_requests').select('*').eq('id', id).single();
   if (!req || req.status !== 'pending') return;
@@ -411,8 +436,8 @@ async function rejectRecount(id) {
   toast('ไม่อนุมัติ — กลับไปใช้ยอดเดิมและบันทึกผลไว้แล้ว');
   loadTab();
 }
-
-
+ 
+ 
 /* ============================== ตารางงาน (พอร์ตจาก ownSched ในต้นแบบ) ==============================
    ดูว่าเดือนนี้ใครจองหยุดวันไหน หัวหน้าต้องไปแทนที่ไหน และวันไหนเป็นวันส่งของ (ห้ามหยุด) */
 async function renderSched(body) {
@@ -430,11 +455,11 @@ async function renderSched(body) {
   const relief = (employees || []).find(e => e.role === 'relief');
   const staffOf = bid => (employees || []).find(e => e.branch_id === bid && e.role === 'staff')?.name || '(ยังไม่ผูกบัญชี)';
   const roundOn = d => ROUNDS.find(r => r.day_of_week === new Date(d + 'T00:00:00').getDay());
-
+ 
   const months = []; scheduleDays.forEach(d => { const mk = monthKey(d); if (!months.some(m => m.mk === mk)) months.push({ mk, label: monthLabel(d) }); });
   const curMk = (S.schedMonth && months.some(m => m.mk === S.schedMonth)) ? S.schedMonth : months[0].mk;
   const inMonth = scheduleDays.filter(d => monthKey(d) === curMk);
-
+ 
   const rows = inMonth.map(d => {
     const off = offBy[d], bid = off?.branch_id, r = roundOn(d);
     const b = bid ? BRANCHES.find(x => x.id === bid) : null;
@@ -445,14 +470,14 @@ async function renderSched(body) {
       <td>${r ? `<span class="pill warn">${esc(r.name)}</span>` : ''}</td>
       <td>${off ? `<input type="date" data-offnew="${off.id}" value="${off.off_date}" style="width:145px"> <button class="mini" data-offchange="${off.id}" data-offdate="${off.off_date}">บันทึกวันใหม่</button> <button class="mini" data-offcancel="${off.id}">ยกเลิก</button>` : '—'}</td></tr>`;
   }).join('');
-
+ 
   const quota = BRANCHES.map(b => {
     const used = inMonth.filter(d => offBy[d]?.branch_id === b.id).length;
     return `<div class="setrow"><span>${esc(staffOf(b.id))} <span class="sub">${esc(b.name)}</span></span>
       <span class="n">${used} / ${b.days_off_quota} วัน</span></div>`;
   }).join('');
   const headUsed = inMonth.filter(d => headOff.has(d)).length;
-
+ 
   body.innerHTML = `<div class="between" style="margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <h3 style="margin:0">ตารางงาน — ${esc(months.find(m => m.mk === curMk).label)}</h3>
       <span class="seg2">${months.map(m => `<button data-schedmonth="${m.mk}" aria-pressed="${m.mk === curMk}">${esc(m.label)}</button>`).join('')}</span>
@@ -499,7 +524,7 @@ async function renderSched(body) {
     renderSched(body);
   });
 }
-
+ 
 /* ============================== สต๊อก ============================== */
 async function renderStock(body) {
   const seg = `<span class="seg2">
@@ -511,14 +536,14 @@ async function renderStock(body) {
   await renderStockView(seg);
   body.querySelectorAll('[data-stockview]').forEach(btn => btn.addEventListener('click', () => { S.stockView = btn.dataset.stockview; renderStockView(seg); }));
 }
-
+ 
 async function renderStockView(seg) {
   const el = $('#stockInner'); if (!el) return;
   if (S.stockView === 'wh') return renderStockWh(el, seg);
   if (S.stockView === 'deliveries') return renderStockDeliveries(el, seg);
   return renderStockBranch(el, seg);
 }
-
+ 
 function stockHeadBar(seg, b, extra) {
   return `<div class="between" style="margin-bottom:14px;flex-wrap:wrap">${seg}
       <span class="row" style="flex-wrap:wrap;row-gap:8px">
@@ -527,7 +552,7 @@ function stockHeadBar(seg, b, extra) {
       </span>
     </div>`;
 }
-
+ 
 async function renderStockBranch(el, seg) {
   const b = BRANCHES.find(x => x.id === S.stockBranch) || BRANCHES[0];
   const cols = dateRange(S.stockRange); // วันนี้ก่อน ไล่ย้อนหลัง
@@ -546,7 +571,7 @@ async function renderStockBranch(el, seg) {
   const stockOfDate = {};
   [...cols].reverse().forEach(d => { if (snapByDate[d]) carry = snapByDate[d]; stockOfDate[d] = carry; });
   const colStocks = cols.map(d => stockOfDate[d] || null);
-
+ 
   const rows = STOCK_ITEMS.map(it => {
     const vals = colStocks.map(st => st ? (st[it.id] ?? null) : null);
     let used = 0;
@@ -571,7 +596,7 @@ async function renderStockBranch(el, seg) {
       <td class="n ${need ? 'pos' : ''}">${need || '–'}</td>
       ${vals.map(v => `<td class="n">${v == null ? '–' : v}</td>`).join('')}
     </tr>`).join('');
-
+ 
   el.innerHTML = `${stockHeadBar(seg, b, `<span class="seg2">
         <button data-srange="7" aria-pressed="${S.stockRange === 7}">7 วัน</button>
         <button data-srange="14" aria-pressed="${S.stockRange === 14}">14 วัน</button>
@@ -594,7 +619,7 @@ async function renderStockBranch(el, seg) {
   const nb = $('#needOnlyBtn'); if (nb) nb.addEventListener('click', () => { S.stockNeedOnly = !S.stockNeedOnly; renderStockView(seg); });
   el.querySelectorAll('[data-srange]').forEach(btn => btn.addEventListener('click', () => { S.stockRange = btn.dataset.srange === 'month' ? 'month' : +btn.dataset.srange; renderStockView(seg); }));
 }
-
+ 
 async function renderStockWh(el, seg) {
   const { data: stock } = await supabase.from('warehouse_stock').select('*');
   const byId = {}; (stock || []).forEach(s => { byId[s.item_id] = s; });
@@ -609,7 +634,7 @@ async function renderStockWh(el, seg) {
   const lows = STOCK_ITEMS.filter(it => (byId[it.id]?.case_qty ?? 1) < 1).length;
   const unchecked = STOCK_ITEMS.filter(it => byId[it.id]?.case_qty == null).length;
   const lastChecked = (stock || []).reduce((m, s) => (!m || (s.last_checked && s.last_checked > m)) ? s.last_checked : m, null);
-
+ 
   el.innerHTML = `<div class="between" style="margin-bottom:14px;flex-wrap:wrap">${seg}
       <span class="sub">${lastChecked ? `หัวหน้าเช็คล่าสุด ${fmtDate(lastChecked)}` : 'ยังไม่เคยเช็ค'}</span></div>
     <div class="kpis">
@@ -622,7 +647,7 @@ async function renderStockWh(el, seg) {
       <tbody>${rows}</tbody></table></div>
     <p class="foot">หัวหน้าเป็นคนนับของจริงที่คลังกลาง (หน้าหัวหน้า → รอบส่งของ → เช็คสต๊อก) — เหลือน้อยกว่า 1 ลังเต็มขึ้นธง "ต้องสั่งเพิ่ม" ทันที</p>`;
 }
-
+ 
 async function renderStockDeliveries(el, seg) {
   const b = BRANCHES.find(x => x.id === S.stockBranch) || BRANCHES[0];
   const overuse = getSettings().overuseThresholdUnits;   // เกณฑ์ "ผิดปกติ" จากตาราง settings (เดิมฝังเลข 0.5 ไว้ในโค้ด)
@@ -660,7 +685,7 @@ async function renderStockDeliveries(el, seg) {
       <button class="mini" data-deliveryprint="${dlv.id}" style="margin-top:8px">ปริ้นใบส่งของ</button>` : ''}
     </div>`;
   }).join('');
-
+ 
   el.innerHTML = `${stockHeadBar(seg, b)}
     <div class="between" style="margin-bottom:10px"><span class="sub">ประวัติการส่งของ สาขา${esc(b.name)}</span>
       <button class="mini" id="deliveryMonthPrintBtn">ปริ้นสรุปส่งของทั้งเดือน (ทุกสาขา)</button></div>
@@ -684,7 +709,7 @@ async function renderStockDeliveries(el, seg) {
     printDoc(html, 'เดือนนี้ยังไม่มีการส่งของ');
   });
 }
-
+ 
 /* ============================== เงินเดือน ==============================
    ชุดข้อมูล+สูตรเงินเดือนของเดือนนี้ ใช้ร่วมกันทั้งแท็บ "เงินเดือน" และแท็บ "กำไร/ขาดทุน"
    (เดิมสองแท็บดึงข้อมูลและคำนวณแยกกันคนละชุด ถ้าแก้สูตรที่เดียวลืมอีกที่ ตัวเลขค่าแรงสองหน้าจะไม่ตรงกันทันที) */
@@ -703,7 +728,7 @@ async function loadMonthPayroll() {
   (allClocks || []).forEach(c => { if (!clocksByDateAll[c.branch_id]) clocksByDateAll[c.branch_id] = {}; clocksByDateAll[c.branch_id][c.clock_date] = c; });
   const relief = (employees || []).find(e => e.role === 'relief');
   const whRent = calc.rentAt((whRentRows || []).map(r => ({ from: r.effective_from, rent: r.rent })), dates[0]);
-
+ 
   const payPeople = BRANCHES.map(b => {
     const emp = (employees || []).find(e => e.branch_id === b.id && e.role === 'staff');
     const records = (allRecords || []).filter(r => r.branch_id === b.id);
@@ -721,7 +746,7 @@ async function loadMonthPayroll() {
   monthPayrollCache = { key: cacheKey, at: Date.now(), data };
   return data;
 }
-
+ 
 async function renderPay(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
   const [{ relief, payPeople, prR }, { data: allRemits }, { data: headRemits }, { data: cashRecords }] = await Promise.all([
@@ -743,9 +768,9 @@ async function renderPay(body) {
       <td class="n" title="${prR.cups} แก้ว">${baht(prR.cupPay)}</td>
       <td class="n ${prR.deduct ? 'neg' : ''}" title="หัวหน้าไม่หักมาสาย/ปิดไว${prR.noClock ? ` · ลืมลงเวลา ${prR.noClock} ครั้ง` : ''}">${prR.deduct ? '−' + baht(prR.deduct) : '0'}${prR.noClock ? ` <span class="sub">(ลืมลงเวลา ${prR.noClock})</span>` : ''}</td>
       <td class="n" style="font-weight:600">${baht(prR.total)}</td></tr>`;
-
+ 
   const salaryTotal = payPeople.reduce((s, p) => s + p.pr.total, prR.total);
-
+ 
   const cashRows = BRANCHES.map(b => {
     const branchRemits = (allRemits || []).filter(x => x.branch_id === b.id)
       .sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)));
@@ -754,13 +779,13 @@ async function renderPay(body) {
     const p = calc.cashPending(records, lastRemitDate);
     return `<tr><td>${esc(b.name)}</td><td class="n">${baht(p.amount)}</td><td class="n">${p.dates.length}</td><td class="n">${lastRemitDate ? fmtDate(lastRemitDate) : b.cash_tracking_from ? `เริ่ม ${fmtDate(b.cash_tracking_from)}` : '—'}</td></tr>`;
   }).join('');
-
+ 
   const cashStart=BRANCHES.reduce((m,b)=>!m||b.cash_tracking_from>m?b.cash_tracking_from:m,null);
   const collected = (allRemits || []).filter(x=>x.method==='cash'&&(!cashStart||x.remit_date>=cashStart)).reduce((s, x) => s + N(x.amount), 0);
   const forwarded = (headRemits || []).filter(x=>!cashStart||x.remit_date>=cashStart).reduce((s, x) => s + N(x.amount), 0);
   const headHeld = collected - forwarded;
   const headLogRows = (headRemits || []).slice().reverse().map(e => `<tr><td class="n">${fmtDate(e.remit_date)}</td><td class="n">${baht(e.amount)}</td><td>${e.method === 'cash' ? 'เงินสด' : 'โอนเงิน'}</td></tr>`).join('');
-
+ 
   body.innerHTML = `<div class="between" style="margin-bottom:14px"><h3 style="margin:0">เงินเดือน — เดือนนี้</h3>
       <button class="mini" id="printAllSlipsBtn">ส่งออกสลิปทุกคน</button></div>
     <div class="tablewrap"><table>
@@ -769,13 +794,13 @@ async function renderPay(body) {
     <p class="foot">แตะที่ช่อง "หัก" เพื่อดูว่ามาจากอะไร · <b>ลืมลงเวลา</b> (ลงไม่ครบทั้งเข้า-ออก) หัก 40 บาท/ครั้ง · มาสาย/ปิดไว หักนาทีละ 1 บาท —
       <b>หัวหน้าไม่หักมาสาย/ปิดไว</b> เพราะไปทำแทนหลายสาขาคนละเวลา แต่ยังต้องลงเวลาให้ครบ ·
       ยอดสุทธิคือจำนวนที่ต้องจ่ายจริงจากรายการทำงานในระบบ</p>
-
+ 
     <div class="card pad" style="margin-top:16px"><div class="between"><span class="eyebrow">รวมเงินเดือนที่ต้องจ่าย</span>
       <span class="bigtime" style="font-size:22px">${baht(salaryTotal)} บาท</span></div></div>
-
+ 
     <h3 style="margin:22px 0 10px">เงินสดค้างที่สาขา</h3>
     <div class="tablewrap"><table><thead><tr><th>สาขา</th><th>ค้างส่ง</th><th>ค้างกี่วัน</th><th>ส่ง/รับล่าสุด</th></tr></thead><tbody>${cashRows}</tbody></table></div>
-
+ 
     <h3 style="margin:22px 0 10px">เงินสดจากหัวหน้า</h3>
     <div class="card pad" style="margin-bottom:14px">
       <div class="between" style="margin-bottom:4px"><div class="eyebrow">หัวหน้าถืออยู่ตอนนี้</div>
@@ -784,7 +809,7 @@ async function renderPay(body) {
     </div>
     <div class="tablewrap"><table><thead><tr><th>วันที่รับ</th><th>จำนวน</th><th>วิธี</th></tr></thead>
       <tbody>${headLogRows || '<tr><td colspan="3" class="sub">ยังไม่มีประวัติ</td></tr>'}</tbody></table></div>`;
-
+ 
   const ps = $('#printAllSlipsBtn'); if (ps) ps.addEventListener('click', async () => {
     const [companies, { data: priv }] = await Promise.all([
       getCompanies(),
@@ -808,7 +833,7 @@ async function renderPay(body) {
     loadTab();
   });
 }
-
+ 
 /* ============================== กำไร/ขาดทุน ============================== */
 async function renderPL(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
@@ -825,7 +850,7 @@ async function renderPL(body) {
   const stockItemsById = {}; STOCK_ITEMS.forEach(it => { stockItemsById[it.id] = { branch_price: it.branch_price, unit: it.unit, per_case: it.per_case, name: it.name }; });
   if (whError) throw whError;
   const extAvail = await whAvailMap(STOCK_ITEMS, whStock || []);
-
+ 
   // ค่าแรงในตารางนี้ = ตัวเดียวกับที่โชว์ในแท็บเงินเดือน (payPeople มาจาก loadMonthPayroll ชุดเดียวกัน)
   const rows = payPeople.map(({ b, records, pr }) => {
     const { sales, grab, grabCommission } = calc.aggregateBranchSales(records, clocksByDateAll[b.id] || {}, cfg);
@@ -844,14 +869,14 @@ async function renderPL(body) {
   const totRepair = rows.reduce((s, x) => s + x.x.repairs, 0);
   const totGrabComm = rows.reduce((s, x) => s + x.x.grabCommission, 0);
   const totNet = rows.reduce((s, x) => s + x.x.net, 0);
-
+ 
   const avgCostById = {}; STOCK_ITEMS.forEach(it => { const row = (whStock || []).find(s => s.item_id === it.id); avgCostById[it.id] = row?.avg_cost ?? 0; });
   const allDeliveries = (deliveries || []).map(x => ({ items: x.items, received: x.received, price_snapshot:x.price_snapshot, cost_snapshot:x.cost_snapshot }));
   // ยอดขายนอกสาขาที่เข้ากำไรคลังกลาง ต้องนับเฉพาะบิลของเดือนนี้ ให้ตรงกับช่วงเดียวกับการส่งของ/ค่าแรง
   const allExternal = (externalSales || []).filter(s => s.sale_date >= dates[0] && s.sale_date <= dates[dates.length - 1]).map(s => ({ items: s.items }));
   const wh = calc.warehousePL({ deliveries: allDeliveries, externalSales: allExternal, stockItemsById, avgCostById, reliefPayroll: prR });
   const companyNet = totNet + wh.net;
-
+ 
   const tbRows = rows.map(({ b, x }) => `<tr><td>${esc(b.name)}</td>
       <td class="n">${baht(x.sales)}</td><td class="n">${baht(x.materialCost)}</td><td class="n">${(x.materialRate * 100).toFixed(1)}%</td>
       <td class="n">${baht(x.labor)}</td><td class="n">${baht(x.rent)}</td><td class="n">${x.repairs ? baht(x.repairs) : '–'}</td>
@@ -860,7 +885,7 @@ async function renderPL(body) {
     + `<tr><td>คลังกลาง</td><td class="n">${baht(wh.sales)}</td><td class="n">${baht(wh.cost)}</td><td class="n">0.0%</td>
       <td class="n">${baht(wh.headLabor)}</td><td class="n">–</td><td class="n">–</td><td class="n">–</td>
       <td class="n ${wh.net < 0 ? 'neg' : ''}" style="font-weight:700">${signed(wh.net)}</td></tr>`;
-
+ 
   const purchRows = (purchases || []).map(p => {
     const it = STOCK_ITEMS.find(x => x.id === p.item_id);
     return `<tr><td>${fmtDate(p.purchase_date)}</td><td>${esc(it ? it.name : '—')}</td><td class="n">${p.case_qty} ลัง</td>
@@ -893,7 +918,7 @@ async function renderPL(body) {
       ${x.items.length ? `<button class="btn primary" data-extsave="${x.id}" style="margin-top:10px">บันทึกการแก้ไข</button>` : ''}
       </div></td></tr>`;
   }).join('');
-
+ 
   body.innerHTML = `
     <h3 style="margin:0 0 14px">กำไร/ขาดทุน — เดือนนี้</h3>
     <div class="kpis">
@@ -911,7 +936,7 @@ async function renderPL(body) {
         <td class="n">${baht(totRepair)}</td><td class="n">${baht(totGrabComm)}</td><td class="n ${companyNet < 0 ? 'neg' : ''}">${signed(companyNet)}</td></tr></tfoot></table></div>
     <p class="foot">"อัตราการใช้วัตถุดิบ" = ต้นทุนวัตถุดิบ ÷ ยอดขาย · ค่าคอมแกร๊บใช้อัตราที่บันทึกไว้ของแต่ละวัน ·
       แถวคลังกลาง: ยอดขาย = ของที่ส่งออกทั้งหมด×ราคาส่งสาขา, ต้นทุน = ของเดียวกัน×ต้นทุนเฉลี่ยจริง, ค่าแรง = เงินเดือนหัวหน้าเต็มจำนวน (รวมค่าเช่าคลังกลางแล้ว)</p>
-
+ 
     <div class="between" style="margin:22px 0 10px"><h3 style="margin:0">ขายนอกสาขา</h3>
       <span class="row" style="gap:8px"><button class="mini" id="ownExtToggle">${S.extOpen ? 'ปิด' : '+ เปิดบิลขาย'}</button>
       <button class="mini" id="extMonthPrintBtn">ปริ้นสรุปทั้งเดือน</button></span></div>
@@ -928,12 +953,12 @@ async function renderPL(body) {
     <div class="tablewrap" style="margin-bottom:8px"><table><thead><tr><th>วันที่</th><th>ผู้ซื้อ</th><th>รายการ</th><th>ยอดรวม</th><th>สถานะเงิน</th><th></th></tr></thead>
       <tbody>${extRows || '<tr><td colspan="6" class="sub">ยังไม่มีบิลขายนอก</td></tr>'}</tbody></table></div>
     <p class="foot" style="margin-bottom:16px">ออกบิลได้ทั้งที่นี่และหน้าหัวหน้า → แท็บ "ขายนอก" · กด <b>แก้ไข</b> เพื่อแก้จำนวนย้อนหลังหรือยกเลิกบิล — ระบบคืน/ตัดสต๊อกคลังกลางตามส่วนต่างให้เอง และจดไว้ในประวัติการแก้ไข</p>
-
+ 
     <h3 style="margin:22px 0 10px">บิลนำเข้าสินค้าล่าสุด</h3>
     <div class="tablewrap" style="margin-bottom:16px"><table><thead><tr><th>วันที่</th><th>วัตถุดิบ</th><th>จำนวน</th><th>ราคารวม</th><th>ทุน/หน่วย</th><th>หมายเหตุ</th></tr></thead>
       <tbody>${purchRows || '<tr><td colspan="6" class="sub">ยังไม่มีบิล</td></tr>'}</tbody></table></div>
     <p class="foot" style="margin-bottom:16px">บันทึกบิลซื้อได้ที่หน้าหัวหน้า → แท็บ "รอบส่งของ" → "เช็คสต๊อก"</p>
-
+ 
     <h3 style="margin:22px 0 10px">ค่าซ่อม/บำรุงรักษา</h3>
     <div class="card pad" style="margin-bottom:16px">
       <div class="between" style="margin-bottom:4px"><div class="eyebrow">บันทึกรายการซ่อม</div>
@@ -946,7 +971,7 @@ async function renderPL(body) {
     </div>
     <div class="tablewrap" style="margin-bottom:16px"><table><thead><tr><th>วันที่</th><th>สาขา</th><th>รายการ</th><th>ค่าใช้จ่าย</th></tr></thead>
       <tbody>${repairRows || '<tr><td colspan="4" class="sub">ยังไม่มีรายการซ่อม</td></tr>'}</tbody></table></div>`;
-
+ 
   body.querySelectorAll('[data-extbillprint]').forEach(btn => btn.addEventListener('click', async () => {
     const sale = (externalSales || []).find(x => x.id === btn.dataset.extbillprint); if (!sale) return;
     const companies = await getCompanies();
@@ -1009,7 +1034,7 @@ async function renderPL(body) {
     renderPL(body);
   });
 }
-
+ 
 /* ============================== ตั้งค่า ============================== */
 /* อ่านค่าจากช่องตั้งค่า — พิมพ์ผิด (มีคอมมา/ตัวอักษร) ให้คืนค่าเดิมไว้ ไม่ใช่บันทึกเป็น 0 เงียบ ๆ
    พอร์ตจาก numSet() ในต้นแบบ ที่มีคอมเมนต์กำกับว่า "เผลอพิมพ์ตัวอักษรลงช่องราคาแก้วทีเดียว ยอดขายทั้งระบบกลายเป็น 0 ทันที" */
@@ -1019,7 +1044,7 @@ function readSetting(inp) {
   inp.dataset.prev = String(v);
   return v;
 }
-
+ 
 async function renderSet(body) {
   body.innerHTML = `<div class="boot">กำลังโหลด…</div>`;
   const [people, { data: branchRentRows }, { data: whRentRows }, { data: par }, { data: settingsRows }, { data: recent7 }, { data: companies }] = await Promise.all([
@@ -1036,13 +1061,13 @@ async function renderSet(body) {
   const relief = employees.find(e => e.role === 'relief');
   const rentAtBranch = bid => calc.rentAt((branchRentRows || []).filter(r => r.branch_id === bid).map(r => ({ from: r.effective_from, rent: r.rent })), TODAY);
   const whRentNow = calc.rentAt((whRentRows || []).map(r => ({ from: r.effective_from, rent: r.rent })), TODAY);
-
+ 
   const cfg0 = getSettings();
   const peopleCard = peopleCardHTML({
     branches: BRANCHES, employees, nid, rentAtBranch, whRentNow,
     graceNote: `นาทีสาย+ปิดไวรวมทั้งเดือนเกิน ${cfg0.diligenceRules.lateAllowance} นาที เบี้ยขยันเดือนนั้นเป็น 0`,
   });
-
+ 
   const pb = BRANCHES.find(x => x.id === (S.parBranch || BRANCHES[0].id)) || BRANCHES[0];
   // ใช้จริง 7 วันล่าสุดของสาขานั้น — เอาไว้ดูประกอบตอนตั้งระดับที่ต้องมีต่อรอบ (พอร์ตจากต้นแบบ)
   const usedByItem = {};
@@ -1065,13 +1090,13 @@ async function renderSet(body) {
       <span class="sub">ระดับต่อรอบ</span><input value="${p?.par_qty ?? 0}" data-par="${it.id}" data-parb="${pb.id}" style="width:64px">
       <span class="sub">ราคาส่งสาขา</span><input value="${it.branch_price}" data-branchprice="${it.id}" style="width:64px"></span></div>`;
   }).join('');
-
+ 
   const settingsByKey = {}; (settingsRows || []).forEach(s => { settingsByKey[s.key] = s.value; });
   const genericKeys = [['grab_commission_pct', 'ค่าคอมแกร๊บ (สัดส่วน เช่น 0.321)'],
     ['overuse_threshold_units', 'เกณฑ์ผลต่างรับของที่ถือว่าผิดปกติ (หน่วย)']];
   const genericRows = genericKeys.map(([k, label]) => `<div class="setrow"><span>${label}</span>
       <input value="${JSON.stringify(settingsByKey[k] ?? '')}" data-settingkey="${k}" style="width:110px"></div>`).join('');
-
+ 
   const structuredValues = {
     pay_rules: { cupPay: 1, latePerMin: 1, earlyPerMin: 1, noClock: 40, excessDayOff: 330, ...(settingsByKey.pay_rules || {}) },
     diligence_rules: { step: 500, cap: 1500, lateAllowance: 250, ...(settingsByKey.diligence_rules || {}) },
@@ -1094,7 +1119,7 @@ async function renderSet(body) {
         <input value="${structuredValues[key][field]}" data-structuredkey="${key}" data-structuredfield="${field}"
           data-prev="${structuredValues[key][field]}" inputmode="decimal" style="width:110px"></div>`).join('')}
     </div>`).join('');
-
+ 
   body.innerHTML = `<div class="setgrid">
     <div class="card pad" style="grid-column:1/-1"><h3 style="margin-bottom:4px">ข้อมูลบริษัท (สำหรับเอกสาร)</h3>
       <p class="sub" style="margin:0 0 10px">ชื่อ/ที่อยู่/เลขผู้เสียภาษีตรงนี้ คือสิ่งที่ขึ้นหัว<b>ใบส่งของและบิลขายนอกสาขา</b>ทุกใบ —
@@ -1132,7 +1157,7 @@ async function renderSet(body) {
     <div class="card pad"><h3 style="margin-bottom:8px">ค่าคงที่ทางธุรกิจ</h3>${structuredRows}${genericRows}
       <p class="foot">กรอกเป็นตัวเลขได้เลย · ค่าใหม่มีผลเมื่อรีเฟรชหรือเข้าสู่ระบบครั้งถัดไป</p></div>
   </div>`;
-
+ 
   const saveBranch = async (bid, patch, msg) => {
     await supabase.from('branches').update(patch).eq('id', bid);
     const b = BRANCHES.find(x => x.id === bid); if (b) Object.assign(b, patch);
@@ -1219,3 +1244,4 @@ async function renderSet(body) {
     toast('บันทึกแล้ว — รายการใหม่ใช้ค่าใหม่อัตโนมัติ รายการเก่าไม่เปลี่ยน');
   }));
 }
+ 
