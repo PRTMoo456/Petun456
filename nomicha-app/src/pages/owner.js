@@ -785,6 +785,16 @@ async function renderPay(body) {
   const forwarded = (headRemits || []).filter(x=>!cashStart||x.remit_date>=cashStart).reduce((s, x) => s + N(x.amount), 0);
   const headHeld = collected - forwarded;
   const headLogRows = (headRemits || []).slice().reverse().map(e => `<tr><td class="n">${fmtDate(e.remit_date)}</td><td class="n">${baht(e.amount)}</td><td>${e.method === 'cash' ? 'เงินสด' : 'โอนเงิน'}</td></tr>`).join('');
+  // รายการเก็บเงินสดจากแต่ละสาขาที่ยังไม่ถูกส่งให้เจ้าของ (นับตั้งแต่ครั้งล่าสุดที่กด "รับเงินแล้ว") — รวมกันต้องได้เท่ากับ headHeld ข้างบนเป๊ะ
+  const lastHeadRemit = (headRemits || []).slice().sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)))[0];
+  const lastHeadAt = lastHeadRemit ? String(lastHeadRemit.created_at || lastHeadRemit.remit_date) : null;
+  const outstandingCashRemits = (allRemits || [])
+    .filter(x => x.method === 'cash' && (!cashStart || x.remit_date >= cashStart) && (!lastHeadAt || String(x.created_at || x.remit_date) > lastHeadAt))
+    .sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)));
+  const headBreakdownRows = outstandingCashRemits.map(r => {
+    const b = BRANCHES.find(x => x.id === r.branch_id);
+    return `<tr><td>${esc(b ? b.name : r.branch_id)}</td><td class="n">${fmtDate(r.remit_date)}</td><td class="n">${baht(N(r.amount))}</td></tr>`;
+  }).join('');
  
   body.innerHTML = `<div class="between" style="margin-bottom:14px"><h3 style="margin:0">เงินเดือน — เดือนนี้</h3>
       <button class="mini" id="printAllSlipsBtn">ส่งออกสลิปทุกคน</button></div>
@@ -806,6 +816,11 @@ async function renderPay(body) {
       <div class="between" style="margin-bottom:4px"><div class="eyebrow">หัวหน้าถืออยู่ตอนนี้</div>
         <button class="mini" id="ownerConfirmHeadBtn" ${headHeld <= 0 ? 'disabled' : ''}>รับเงินแล้ว</button></div>
       <div class="bigtime">${baht(headHeld)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
+      ${headBreakdownRows ? `<div class="tablewrap" style="margin-top:10px"><table>
+        <thead><tr><th>เก็บจากสาขา</th><th>วันที่เก็บ</th><th>จำนวน</th></tr></thead>
+        <tbody>${headBreakdownRows}</tbody>
+        <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td colspan="2">รวม</td><td class="n">${baht(headHeld)}</td></tr></tfoot>
+      </table></div>` : ''}
     </div>
     <div class="tablewrap"><table><thead><tr><th>วันที่รับ</th><th>จำนวน</th><th>วิธี</th></tr></thead>
       <tbody>${headLogRows || '<tr><td colspan="3" class="sub">ยังไม่มีประวัติ</td></tr>'}</tbody></table></div>`;
@@ -1244,4 +1259,3 @@ async function renderSet(body) {
     toast('บันทึกแล้ว — รายการใหม่ใช้ค่าใหม่อัตโนมัติ รายการเก่าไม่เปลี่ยน');
   }));
 }
- 
