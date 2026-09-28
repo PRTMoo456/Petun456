@@ -4,7 +4,8 @@
 -- ยอดขาย เงินโอน Grab รายได้เพิ่ม และรายจ่ายทั้งหมดเป็น 0
 --
 -- ฟังก์ชันนี้ idempotent: รันซ้ำได้ และไม่แตะวันที่มี clock-in จริง
--- หน้าเจ้าของเรียกฟังก์ชันนี้อัตโนมัติเมื่อเปิดระบบ
+-- สำคัญ: ถ้ามี daily_records ของวันนั้นอยู่แล้ว ให้ถือว่าเป็นข้อมูลจริง/ข้อมูลที่เจ้าของยืนยัน
+-- ห้ามระบบอัตโนมัติทับ record เดิมเป็นปิดร้าน เพราะเจ้าของอาจกรอกยอดย้อนหลังแทนพนักงาน
 
 create or replace function public.owner_reconcile_unstaffed_leave_days()
 returns jsonb
@@ -65,53 +66,10 @@ begin
     for update;
 
     if found then
-      -- ถูกต้องอยู่แล้ว ไม่ทำซ้ำ
-      if currow.store_closed
-         and currow.closure_reason = 'approved_leave'
-         and coalesce(currow.leave_quota_days, 0) = 1 then
-        continue;
-      end if;
-
-      -- เก็บร่องรอยว่ารายการเดิมถูกปรับจากยอดย้อนหลัง/ยอดปกติเป็นวันหยุดไม่มีคนแทน
-      insert into record_edit_history(record_id, field, from_value, to_value, label, reason, edited_by)
-      values(
-        currow.id,
-        'store_closed',
-        coalesce(currow.store_closed, false)::text,
-        'true',
-        'ปรับเป็นวันหยุดไม่มีคนแทน',
-        'วันหยุดผ่านไปแล้วและไม่มี clock-in ของคนทำแทน',
-        auth.uid()
-      );
-
-      update daily_records
-      set
-        staff_name = 'ปิดร้าน',
-        open_yen = prevrow.yen,
-        open_pan = prevrow.pan,
-        yen = prevrow.yen,
-        yen_add = 0,
-        pan = prevrow.pan,
-        pan_add = 0,
-        cup_own = 0,
-        topping = 0,
-        other = 0,
-        ice = 0,
-        water = 0,
-        etc = 0,
-        cash = prevrow.float_cash,
-        transfer = 0,
-        grab = 0,
-        thaichaithai = 0,
-        float_cash = prevrow.float_cash,
-        stock_snapshot = prevrow.stock_snapshot,
-        sent = true,
-        closed = true,
-        store_closed = true,
-        closure_reason = 'approved_leave',
-        leave_quota_days = 1,
-        updated_at = now()
-      where id = currow.id;
+      -- มี record อยู่แล้ว = มีข้อมูลที่ถูกบันทึก/ยืนยันไว้ ห้าม reconcile อัตโนมัติทับ
+      -- แม้ไม่มี clock-in เพราะเจ้าของอาจกรอกยอดย้อนหลังแทนพนักงานที่ลืมส่งยอด
+      -- วันปิดร้านที่ถูกสร้างไว้ก่อนแล้วก็ไม่ต้องทำอะไรซ้ำ
+      continue;
     else
       insert into daily_records(
         branch_id, record_date, staff_name,
@@ -145,6 +103,6 @@ $$;
 revoke all on function public.owner_reconcile_unstaffed_leave_days() from public;
 grant execute on function public.owner_reconcile_unstaffed_leave_days() to authenticated;
 
--- ซ่อมข้อมูลย้อนหลังทันทีเมื่อ migration นี้ถูกนำไปใช้
--- รวมถึงเคสที่เจ้าของเคยกรอกค่าของเมื่อวานเข้า daily_records ด้วยมือ
+-- ตรวจและเติมเฉพาะวันหยุดที่ยังไม่มี daily_records เมื่อ migration นี้ถูกนำไปใช้
+-- ไม่แก้ ไม่ลบ และไม่ทับ daily_records ที่มีอยู่แล้ว
 select public.owner_reconcile_unstaffed_leave_days();
