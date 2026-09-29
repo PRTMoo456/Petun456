@@ -1,13 +1,13 @@
--- Restore the Bandit 2026-09-26 record from the last owner-confirmed snapshot
--- that existed immediately before migration 009 incorrectly converted it to a closure.
--- Also records the repair in record_edit_history for auditability.
+-- Repair Bandit 2026-09-26 as the real personal-leave/no-substitute closure.
+-- IMPORTANT: do not turn this day back into a normal work/sales record.
+-- The business rule is: carry forward only continuity values from 2026-09-25,
+-- while all sales/income/expense/additions are zero and the day remains closed.
 do $$
 declare
   v_id uuid := '4e98b714-b7db-465b-b35b-6b915ce39915';
-  v_snap jsonb;
+  v_prev daily_records%rowtype;
   v_before daily_records%rowtype;
   v_after daily_records%rowtype;
-  s daily_records%rowtype;
 begin
   select * into v_before
   from daily_records
@@ -20,52 +20,44 @@ begin
     raise exception 'ไม่พบรายการบัณฑิตวันที่ 26/09/2026';
   end if;
 
-  select h.to_value::jsonb into v_snap
-  from record_edit_history h
-  where h.record_id = v_id
-    and h.field = 'multiple'
-    and h.label = 'แก้ข้อมูลที่กรอกผิด'
-    and h.edited_at < timestamptz '2026-09-27 17:22:22+00'
-  order by h.edited_at desc
+  select * into v_prev
+  from daily_records
+  where branch_id = 'bdt'
+    and record_date < date '2026-09-26'
+    and sent = true
+  order by record_date desc
   limit 1;
 
-  if v_snap is null then
-    raise exception 'ไม่พบ snapshot ที่เจ้าของยืนยันก่อนถูกระบบทับ';
+  if not found then
+    raise exception 'ไม่พบยอดก่อนวันที่ 26/09/2026 สำหรับยกยอดต่อ';
   end if;
-
-  select * into s
-  from jsonb_populate_record(null::daily_records, v_snap);
 
   update daily_records
   set
-    staff_name = s.staff_name,
-    open_yen = s.open_yen,
-    open_pan = s.open_pan,
-    yen = s.yen,
-    yen_add = s.yen_add,
-    pan = s.pan,
-    pan_add = s.pan_add,
-    cup_own = s.cup_own,
-    topping = s.topping,
-    other = s.other,
-    ice = s.ice,
-    water = s.water,
-    etc = s.etc,
-    cash = s.cash,
-    transfer = s.transfer,
-    grab = s.grab,
-    thaichaithai = s.thaichaithai,
-    float_cash = s.float_cash,
-    stock_snapshot = s.stock_snapshot,
-    cup_price_yen = s.cup_price_yen,
-    cup_price_pan = s.cup_price_pan,
-    grab_commission_pct = s.grab_commission_pct,
-    sent = s.sent,
-    closed = s.closed,
-    store_closed = false,
-    closure_reason = null,
-    leave_quota_days = 0,
-    created_by = s.created_by,
+    staff_name = 'ปิดร้าน',
+    open_yen = v_prev.yen,
+    open_pan = v_prev.pan,
+    yen = v_prev.yen,
+    yen_add = 0,
+    pan = v_prev.pan,
+    pan_add = 0,
+    cup_own = 0,
+    topping = 0,
+    other = 0,
+    ice = 0,
+    water = 0,
+    etc = 0,
+    cash = v_prev.float_cash,
+    transfer = 0,
+    grab = 0,
+    thaichaithai = 0,
+    float_cash = v_prev.float_cash,
+    stock_snapshot = v_prev.stock_snapshot,
+    sent = true,
+    closed = true,
+    store_closed = true,
+    closure_reason = 'approved_leave',
+    leave_quota_days = 1,
     updated_at = now()
   where id = v_id
   returning * into v_after;
@@ -77,13 +69,13 @@ begin
     'multiple',
     to_jsonb(v_before)::text,
     to_jsonb(v_after)::text,
-    'กู้ยอดเจ้าของที่ถูกระบบทับ',
-    'กู้ยอดบัณฑิต 26/09/2026 จาก snapshot ล่าสุดที่เจ้าของยืนยันก่อน reconcile ผิดพลาด',
+    'แก้วันหยุดไม่มีคนแทนให้ยกยอดถูกต้อง',
+    'บัณฑิต 26/09/2026 เป็นวันหยุดส่วนตัวไม่มีคนแทน: ยกแก้ว/เงินทอน/สต๊อกจากวันก่อนหน้าเท่านั้น และยอดขาย/โอน/Grab/รายรับรายจ่ายเป็น 0',
     auth.uid()
   );
 end $$;
 
--- Verification: this must return one normal sent record, not a closure.
+-- Verification: must stay a closure and carry 25/09 continuity values.
 select
   branch_id, record_date, staff_name,
   open_yen, yen, yen_add, open_pan, pan, pan_add,
