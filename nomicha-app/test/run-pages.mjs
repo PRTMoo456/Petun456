@@ -664,6 +664,26 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log('✓ แก้บิลนำเข้า — ปรับจำนวน/มูลค่าสต๊อกถูกต้อง และไม่แตะประวัติรายการอื่น');
 }
 
+// 4.22.2 แก้บิลนำเข้าผ่านหน้าจอจริง — พิมพ์ราคาแบบมีคอมม่า (เช่น "3,300") ต้องล้างคอมม่าก่อนบันทึก ไม่ใช่ Number("3,300") ตรง ๆ ซึ่งได้ NaN
+{
+  root.innerHTML = '<div id="roleRoot"></div>';
+  const owner2 = await import('../src/pages/owner.js?v=2');
+  await owner2.renderOwnerApp(document.getElementById('roleRoot'), db.employees.find(e => e.id === 'u-own'));
+  await new Promise(r => setTimeout(r, 100));
+  document.querySelector('[data-otab="pl"]').click();
+  await new Promise(r => setTimeout(r, 160));
+  const ownBody = document.getElementById('ownBody');
+  ownBody.querySelector('[data-purchedit="p1"]').click();
+  await new Promise(r => setTimeout(r, 60));
+  ownBody.querySelector('[data-purchprice="p1"]').value = '3,300';
+  ownBody.querySelector('[data-purchsave="p1"]').click();
+  await new Promise(r => setTimeout(r, 80));
+  const purchaseAfter = db.purchases.find(p => p.id === 'p1');
+  check('พิมพ์ราคาบิลแก้ไขแบบมีคอมม่าแล้วบันทึกได้', purchaseAfter.total_price === 3300,
+    `ได้ total_price = ${purchaseAfter.total_price} (คาดว่า 3300 — ถ้าไม่ตรงแปลว่าคอมม่าไม่ถูกล้างก่อนแปลงเป็นตัวเลข)`);
+  console.log('✓ แก้บิลนำเข้าผ่านหน้าจอจริง — พิมพ์ราคาแบบมีคอมม่าบันทึกถูกต้อง');
+}
+
 // 4.23 ออกบิลขายนอก — ตัดสต๊อกจริงและกันขายเกินของที่มี
 {
   const wh = await import('../src/warehouse.js');

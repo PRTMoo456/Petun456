@@ -1049,8 +1049,8 @@ async function renderPL(body) {
   });
   body.querySelectorAll('[data-purchsave]').forEach(btn => btn.addEventListener('click', async () => {
     const id = btn.dataset.purchsave;
-    const caseQty = Number(body.querySelector(`[data-purchqty="${id}"]`).value);
-    const totalPrice = Number(body.querySelector(`[data-purchprice="${id}"]`).value);
+    const caseQty = N(numIn(body.querySelector(`[data-purchqty="${id}"]`).value));
+    const totalPrice = N(numIn(body.querySelector(`[data-purchprice="${id}"]`).value));
     const purchaseDate = body.querySelector(`[data-purchdate="${id}"]`).value;
     btn.disabled = true;
     const res = await editPurchase({ purchaseId: id, purchaseDate, caseQty, totalPrice });
