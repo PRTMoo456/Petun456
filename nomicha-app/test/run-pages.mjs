@@ -630,6 +630,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
 // 4.22.1 แก้บิลนำเข้า — ปรับเฉพาะส่วนต่างของบิลเป้าหมาย ไม่เปลี่ยนต้นทุนที่ snapshot ในรายการเก่า
 {
   check('เจ้าของมีช่องเพิ่มบิลนำเข้า', /id="ownPurchToggle"/.test(ownerHTML.pl || ''), 'ไม่พบปุ่มเพิ่มบิลนำเข้าในหน้ากำไรขาดทุน');
+  check('รายการนำเข้าเริ่มที่ 10 รายการและมีปุ่มดูทั้งหมด', /บิลนำเข้าสินค้าล่าสุด 10 รายการ/.test(ownerHTML.pl || '') && /id="ownPurchShowAll">ดูทั้งหมด/.test(ownerHTML.pl || ''), 'ไม่พบปุ่มดูบิลนำเข้าทั้งหมด');
   check('มีปุ่มแก้บิลนำเข้า', /data-purchedit="p1"/.test(ownerHTML.pl || ''), 'ไม่พบปุ่มแก้ไขในตารางบิลนำเข้า');
   const wh = await import('../src/warehouse.js');
   const addItem = db.stock_items[0];

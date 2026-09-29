@@ -14,7 +14,7 @@ import * as calc from '../calc.js';
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
 let monthPayrollCache = null;
 let tabLoadTicket = 0;
-let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, purchaseOpen: false, purchaseItemId: null, purchaseQty: '', purchasePrice: '', purchaseEditing: null, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
+let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, purchaseOpen: false, purchaseShowAll: false, purchaseItemId: null, purchaseQty: '', purchasePrice: '', purchaseEditing: null, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
  
 export async function renderOwnerApp(root, me) {
   ME = me; TODAY = todayISO();
@@ -854,12 +854,14 @@ async function renderPay(body) {
 async function renderPL(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
   const dates = monthDates(TODAY);
+  let purchasesQuery = supabase.from('purchases').select('*').order('purchase_date', { ascending: false });
+  if (!S.purchaseShowAll) purchasesQuery = purchasesQuery.limit(10);
   const [{ cfg, clocksByDateAll, employees, payPeople, prR }, { data: branchRentRows }, { data: deliveries }, { data: repairs }, { data: purchases }, { data: whStock, error: whError }, { data: externalSales }] = await Promise.all([
     loadMonthPayroll(),
     supabase.from('branch_rent_history').select('*').order('effective_from'),
     supabase.from('deliveries').select('*').gte('delivery_date', dates[0]).lte('delivery_date', dates[dates.length - 1]),
     supabase.from('repairs').select('*').gte('repair_date', dates[0]).lte('repair_date', dates[dates.length - 1]),
-    supabase.from('purchases').select('*').order('purchase_date', { ascending: false }).limit(12),
+    purchasesQuery,
     supabase.from('warehouse_stock').select('*'),
     supabase.from('external_sales').select('*').gte('sale_date', dates[0]).lte('sale_date', dates[dates.length - 1]).order('sale_date', { ascending: false }),
   ]);
@@ -986,8 +988,9 @@ async function renderPL(body) {
       <tbody>${extRows || '<tr><td colspan="6" class="sub">ยังไม่มีบิลขายนอก</td></tr>'}</tbody></table></div>
     <p class="foot" style="margin-bottom:16px">ออกบิลได้ทั้งที่นี่และหน้าหัวหน้า → แท็บ "ขายนอก" · กด <b>แก้ไข</b> เพื่อแก้จำนวนย้อนหลังหรือยกเลิกบิล — ระบบคืน/ตัดสต๊อกคลังกลางตามส่วนต่างให้เอง และจดไว้ในประวัติการแก้ไข</p>
  
-    <div class="between" style="margin:22px 0 10px"><h3 style="margin:0">บิลนำเข้าสินค้าล่าสุด</h3>
-      <button class="mini" id="ownPurchToggle">${S.purchaseOpen ? 'ปิด' : '+ เพิ่มบิลนำเข้า'}</button></div>
+    <div class="between" style="margin:22px 0 10px"><h3 style="margin:0">บิลนำเข้าสินค้า${S.purchaseShowAll ? 'ทั้งหมด' : 'ล่าสุด 10 รายการ'}</h3>
+      <span class="row" style="gap:8px"><button class="mini" id="ownPurchShowAll">${S.purchaseShowAll ? 'แสดง 10 ล่าสุด' : 'ดูทั้งหมด'}</button>
+      <button class="mini" id="ownPurchToggle">${S.purchaseOpen ? 'ปิด' : '+ เพิ่มบิลนำเข้า'}</button></span></div>
     ${S.purchaseOpen ? `<div class="card pad" style="margin-bottom:10px">
       <div class="field"><label>สินค้า</label><select id="ownPurchItem" class="ctl">${STOCK_ITEMS.map(it => `<option value="${it.id}" ${String(it.id) === String(S.purchaseItemId) ? 'selected' : ''}>${esc(it.name)}</option>`).join('')}</select></div>
       <div class="row" style="gap:10px;align-items:end;flex-wrap:wrap">
@@ -1031,6 +1034,7 @@ async function renderPL(body) {
     el.textContent = it && q > 0 && p > 0 ? `เท่ากับ ${(p / (q * it.per_case)).toFixed(2)} บาท/${it.unit} (รวม ${q * it.per_case} ${it.unit})` : '';
   };
   const opt = $('#ownPurchToggle'); if (opt) opt.addEventListener('click', () => { S.purchaseOpen = !S.purchaseOpen; renderPL(body); });
+  const opsa = $('#ownPurchShowAll'); if (opsa) opsa.addEventListener('click', () => { S.purchaseShowAll = !S.purchaseShowAll; S.purchaseEditing = null; renderPL(body); });
   const opi = $('#ownPurchItem'); if (opi) opi.addEventListener('change', () => { S.purchaseItemId = opi.value; purchasePreviewEl(); });
   const opq = $('#ownPurchQty'); if (opq) opq.addEventListener('input', () => { S.purchaseQty = numIn(opq.value); purchasePreviewEl(); });
   const opp = $('#ownPurchPrice'); if (opp) opp.addEventListener('input', () => { S.purchasePrice = numIn(opp.value); purchasePreviewEl(); });
