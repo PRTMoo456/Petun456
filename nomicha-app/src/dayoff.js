@@ -2,6 +2,13 @@
 // พอร์ตตรงจาก quotaReport()/dayChip()/OFF_LEGEND/quotaHTML ในต้นแบบ nomicha.html
 import { dt, esc, isoDate, THMONTHS, monthKey, monthLabel } from './util.js';
 
+// ช่วงจองวันหยุดล่วงหน้า (ต้องตรงกับ policy ในฐานข้อมูล migration 012)
+export const LEAVE_MIN_DAYS = 4;
+export const LEAVE_MAX_DAYS = 28;
+export const LEAVE_WINDOW_TEXT = `ต้องจองล่วงหน้าอย่างน้อย ${LEAVE_MIN_DAYS} วัน และไม่เกิน ${LEAVE_MAX_DAYS} วัน`;
+// วันแรกที่จองได้ — future มาจาก futureDates() ซึ่งเริ่มที่พรุ่งนี้ (index 0 = +1 วัน)
+export const firstBookable = future => future[LEAVE_MIN_DAYS - 1];
+
 // สรุปโควตาวันหยุดแยกเป็นรายเดือน ตามเดือนที่ปรากฏในช่วงวันที่กำลังแสดง (windowDates)
 export function quotaReport(offDates, windowDates, quota) {
   const months = [];

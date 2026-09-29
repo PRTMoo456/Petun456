@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient.js';
 import { getSettings } from '../settings.js';
 import { $, N, numIn, baht, esc, toast, todayISO, nowHM, fmtDate, monthKey, monthLabel, monthDates, DAYS } from '../util.js';
 import { loadRefs } from '../refs.js';
-import { quotaReport, dayChip, OFF_LEGEND, quotaHTML, futureDates } from '../dayoff.js';
+import { quotaReport, dayChip, OFF_LEGEND, quotaHTML, futureDates, LEAVE_MIN_DAYS, LEAVE_MAX_DAYS, LEAVE_WINDOW_TEXT, firstBookable } from '../dayoff.js';
 import { getCompanies, reliefSlipHTML, externalBillHTML, printDoc } from '../print.js';
 import { defaultDraft, closeFormHTML, validateClose, submitClose, CLOSE_REASON_OPTIONS, closeStore } from '../close.js';
 import { verifyForClock } from '../geo.js';
@@ -74,7 +74,7 @@ function roundDate(r) {
 /* ============================== ตารางงาน ============================== */
 async function renderSched(body) {
   const future = futureDates(TODAY, 31);
-  const win28 = future.slice(0, 28);
+  const win28 = future.slice(0, LEAVE_MAX_DAYS);
   const [{ data: dayOffs }, { data: myOffs }, { data: staffRows }] = await Promise.all([
     supabase.from('day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
     supabase.from('relief_day_offs').select('*').gte('off_date', TODAY).lte('off_date', future[future.length - 1]),
@@ -98,12 +98,12 @@ async function renderSched(body) {
     const mine = myOffDates.includes(d);
     const round = !!isRoundOn(d);
     const covering = (dayOffs || []).some(x => x.off_date === d);
-    const tooSoon = d < win28[2];
+    const tooSoon = d < firstBookable(win28);
     const blocked = round || covering || (tooSoon && !mine);
     const full = rMonthFull.get(monthLabel(d)) || false;
     const newMonth = d === win28.find(x => monthKey(x) === monthKey(d));
     const cls = round ? 'round' : mine ? 'mine' : tooSoon ? 'too-soon' : blocked ? 'round' : full ? 'full' : 'free';
-    const title = round ? 'วันส่งของ — ห้ามหยุด' : covering ? 'ต้องไปทำแทนสาขาที่จองไว้' : tooSoon && !mine ? 'ต้องจองล่วงหน้าอย่างน้อย 3 วัน' : full && !mine ? `ครบโควตาของเดือน ${monthLabel(d)} แล้ว` : '';
+    const title = round ? 'วันส่งของ — ห้ามหยุด' : covering ? 'ต้องไปทำแทนสาขาที่จองไว้' : tooSoon && !mine ? `ต้องจองล่วงหน้าอย่างน้อย ${LEAVE_MIN_DAYS} วัน` : full && !mine ? `ครบโควตาของเดือน ${monthLabel(d)} แล้ว` : '';
     const tag = round ? '<span class="dt">ส่งของ</span>' : covering ? '<span class="dt">ไปแทน</span>' : mine ? '<span class="dt">หยุด</span>' : tooSoon ? '<span class="dt">จองไม่ทัน</span>' : cls === 'free' ? '<span class="dt ok">ว่าง</span>' : '';
     return dayChip(d, 'roff', cls, blocked || (full && !mine), title, tag, newMonth);
   }).join('');
@@ -117,7 +117,7 @@ async function renderSched(body) {
     </div>
     <div class="card pad">
       <div class="eyebrow" style="margin-bottom:4px">จองวันหยุดของคุณ</div>
-      <p class="sub" style="margin:0 0 10px">ต้องจองล่วงหน้าอย่างน้อย 3 วัน และเลือกได้ถึง 28 วันข้างหน้า · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง</p>
+      <p class="sub" style="margin:0 0 10px">ต้องจองล่วงหน้าอย่างน้อย ${LEAVE_MIN_DAYS} วัน และเลือกได้ถึง ${LEAVE_MAX_DAYS} วันข้างหน้า · แตะวันที่ขึ้น <b style="color:var(--brand)">ว่าง</b> เพื่อจอง</p>
       <div class="daygrid">${offChips}</div>
       ${OFF_LEGEND}
       ${quotaHTML(rReport, ME.days_off_quota ?? 2)}
@@ -137,15 +137,15 @@ async function renderSched(body) {
 async function toggleReliefOff(dateISO, dayOffs) {
   const { data: cur } = await supabase.from('relief_day_offs').select('*').eq('off_date', dateISO).maybeSingle();
   if (cur) { await supabase.from('relief_day_offs').delete().eq('off_date', dateISO); toast('ยกเลิกวันหยุด ' + fmtDate(dateISO)); await draw($('#roleRoot')); return; }
-  const bookingDates = futureDates(TODAY, 28);
-  if (dateISO < bookingDates[2] || dateISO > bookingDates[bookingDates.length - 1]) {
-    toast('ต้องจองล่วงหน้าอย่างน้อย 3 วัน และไม่เกิน 28 วัน'); return;
+  const bookingDates = futureDates(TODAY, LEAVE_MAX_DAYS);
+  if (dateISO < firstBookable(bookingDates) || dateISO > bookingDates[bookingDates.length - 1]) {
+    toast(LEAVE_WINDOW_TEXT); return;
   }
   const rd2 = isRoundOn(dateISO);
   if (rd2) { toast(`วันส่งของ (${rd2.name}) ห้ามหยุด`); return; }
   const covering = dayOffs.some(x => x.off_date === dateISO);
   if (covering) { toast('วันนี้ต้องไปทำแทนสาขาที่จองไว้แล้ว'); return; }
-  const future = futureDates(TODAY, 28);
+  const future = futureDates(TODAY, LEAVE_MAX_DAYS);
   const { data: myOffs } = await supabase.from('relief_day_offs').select('*').gte('off_date', future[0]).lte('off_date', future[future.length - 1]);
   const used = (myOffs || []).filter(x => monthKey(x.off_date) === monthKey(dateISO)).length;
   if (used >= (ME.days_off_quota ?? 2)) { toast(`จองครบ ${ME.days_off_quota ?? 2} วันของเดือน ${monthLabel(dateISO)} แล้ว`); return; }
@@ -282,7 +282,8 @@ async function renderWh(el) {
 async function saveWhStock(stockById) {
   for (const it of STOCK_ITEMS) {
     const values = [S.whDraft[it.id], S.whDraftLoose[it.id]];
-    if (values.some(raw => raw != null && raw !== '' && (N(raw) < 0 || !Number.isInteger(N(raw))))) {
+    // numIn ตัดคอมม่าออก และคืน '' ถ้าพิมพ์ไม่ใช่ตัวเลข (เช่น "1o") — เดิมใช้ N() ซึ่งแปลงเป็น 0 เงียบ ๆ แล้วบันทึกทับสต๊อกจริงเป็น 0
+    if (values.some(raw => raw != null && raw !== '' && (numIn(raw) === '' || numIn(raw) < 0 || !Number.isInteger(numIn(raw))))) {
       toast(`${it.name}: จำนวนลังและชิ้นเศษต้องเป็นจำนวนเต็มตั้งแต่ 0`); return;
     }
   }
@@ -293,8 +294,8 @@ async function saveWhStock(stockById) {
     if ((v == null || v === '') && (vl == null || vl === '')) return;
     const row = {
       item_id: it.id,
-      case_qty: (v != null && v !== '') ? N(v) : (stockById[it.id]?.case_qty ?? 0),
-      loose_qty: (vl != null && vl !== '') ? N(vl) : (stockById[it.id]?.loose_qty ?? 0),
+      case_qty: (v != null && v !== '') ? numIn(v) : (stockById[it.id]?.case_qty ?? 0),
+      loose_qty: (vl != null && vl !== '') ? numIn(vl) : (stockById[it.id]?.loose_qty ?? 0),
     };
     if (row.case_qty < 0 || row.loose_qty < 0 || !Number.isInteger(row.case_qty) || !Number.isInteger(row.loose_qty)) return;
     counts.push(row);
@@ -310,9 +311,12 @@ async function saveWhStock(stockById) {
   await draw($('#roleRoot'));
 }
 
-let purchState = { open: false, itemId: STOCK_ITEMS[0]?.id, qty: '', price: '' };
+// itemId เริ่มเป็น null — ตอนไฟล์นี้โหลด STOCK_ITEMS ยังว่างอยู่ (โหลดจากฐานข้อมูลทีหลัง)
+// จึงใช้ purchItem() หาของจริงทุกครั้ง: ถ้ายังไม่ได้เลือก = รายการแรกที่ขึ้นอยู่บนจอ
+let purchState = { open: false, itemId: null, qty: '', price: '' };
+const purchItem = () => STOCK_ITEMS.find(x => x.id === purchState.itemId) || STOCK_ITEMS[0];
 function renderPurchCard() {
-  const it = STOCK_ITEMS.find(x => x.id === purchState.itemId) || STOCK_ITEMS[0];
+  const it = purchItem();
   const q = N(purchState.qty), p = N(purchState.price);
   const preview = (it && q > 0 && p > 0) ? `เท่ากับ ${(p / (q * it.per_case)).toFixed(2)} บาท/${it.unit} (รวม ${q * it.per_case} ${it.unit})` : '';
   return `<div class="between" style="margin-bottom:4px">
@@ -321,7 +325,7 @@ function renderPurchCard() {
     </div>
     ${purchState.open ? `
     <div class="field"><label>รายการ</label>
-      <select id="purchItemSel" class="ctl">${STOCK_ITEMS.map(x => `<option value="${x.id}" ${x.id === purchState.itemId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <select id="purchItemSel" class="ctl">${STOCK_ITEMS.map(x => `<option value="${x.id}" ${x.id === it?.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
     <div class="field"><label>จำนวนที่ซื้อ (ลัง)</label><input id="purchQty" inputmode="numeric" value="${purchState.qty}"></div>
     <div class="field"><label>ราคารวมที่จ่าย (บาท)</label><input id="purchPrice" inputmode="numeric" value="${purchState.price}"></div>
     <p class="sub" id="purchPreview" style="color:var(--brand)">${preview}</p>
@@ -330,18 +334,18 @@ function renderPurchCard() {
 function wirePurchCard() {
   const t = $('#purchToggleBtn'); if (t) t.addEventListener('click', () => { purchState.open = !purchState.open; $('#purchCard').innerHTML = renderPurchCard(); wirePurchCard(); });
   const sel = $('#purchItemSel'); if (sel) sel.addEventListener('change', () => { purchState.itemId = +sel.value; $('#purchPreview').textContent = ''; refreshPurchPreview(); });
-  const q = $('#purchQty'); if (q) q.addEventListener('input', () => { purchState.qty = q.value; refreshPurchPreview(); });
-  const p = $('#purchPrice'); if (p) p.addEventListener('input', () => { purchState.price = p.value; refreshPurchPreview(); });
+  const q = $('#purchQty'); if (q) q.addEventListener('input', () => { purchState.qty = numIn(q.value); refreshPurchPreview(); });
+  const p = $('#purchPrice'); if (p) p.addEventListener('input', () => { purchState.price = numIn(p.value); refreshPurchPreview(); });
   const sub = $('#purchSubmitBtn'); if (sub) sub.addEventListener('click', doSubmitPurchase);
 }
 function refreshPurchPreview() {
-  const it = STOCK_ITEMS.find(x => x.id === purchState.itemId) || STOCK_ITEMS[0];
+  const it = purchItem();
   const q = N(purchState.qty), p = N(purchState.price);
   const el = $('#purchPreview'); if (!el) return;
   el.textContent = (it && q > 0 && p > 0) ? `เท่ากับ ${(p / (q * it.per_case)).toFixed(2)} บาท/${it.unit} (รวม ${q * it.per_case} ${it.unit})` : '';
 }
 async function doSubmitPurchase() {
-  const it = STOCK_ITEMS.find(x => x.id === purchState.itemId);
+  const it = purchItem();
   const q = N(purchState.qty), p = N(purchState.price);
   if (!it || q <= 0 || !Number.isInteger(q)) { toast('จำนวนที่ซื้อต้องเป็นลังเต็มจำนวนตั้งแต่ 1 ขึ้นไป'); return; }
   if (p <= 0) { toast('กรอกราคารวมที่จ่ายให้ถูกต้อง'); return; }
@@ -351,7 +355,7 @@ async function doSubmitPurchase() {
   });
   if (error) { toast('บันทึกบิลไม่สำเร็จ: ' + error.message); if (sub) { sub.disabled = false; sub.textContent = 'บันทึกบิลซื้อ'; } return; }
   toast(`บันทึกบิล ${it.name} ${q} ลัง ${baht(p)} บาทแล้ว — ต้นทุนเฉลี่ยใหม่ ${Number(data?.avg_cost ?? 0).toFixed(2)} บาท/${it.unit}`);
-  purchState = { open: false, itemId: STOCK_ITEMS[0]?.id, qty: '', price: '' };
+  purchState = { open: false, itemId: null, qty: '', price: '' };
   await draw($('#roleRoot'));
 }
 

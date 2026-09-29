@@ -9,6 +9,9 @@ const TZ = process.env.TZ || '(เครื่อง)';
 const dom = new JSDOM(`<!doctype html><html><body>
   <div id="app"></div><div class="toast" id="toast"></div><div class="print-slips" id="printSlips"></div>
 </body></html>`, { url: 'https://test.local', pretendToBeVisual: true });
+// jsdom ไม่ได้คำนวณ isSecureContext จาก URL (ค่าเป็น undefined เสมอ) ทำให้ geo.js คิดว่าไม่ได้เปิดผ่าน https
+// แล้วเทส GPS ตกทั้งหมด ทั้งที่มือถือจริงเปิดผ่าน https ได้ค่า true — ตั้งให้ตรงกับของจริง
+Object.defineProperty(dom.window, 'isSecureContext', { value: true, configurable: true });
 global.window = dom.window; global.document = dom.window.document;
 global.HTMLElement = dom.window.HTMLElement;
 global.Element = dom.window.Element; global.Node = dom.window.Node;
@@ -230,6 +233,21 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('ปฏิทินไม่มีวันนี้', !f.includes(TODAY), 'ปฏิทินจองวันหยุดมีวันนี้ปนอยู่');
   check('ปฏิทินครบ 31 วันไม่ซ้ำ', new Set(f).size === 31, `ได้ ${new Set(f).size} วันไม่ซ้ำ`);
   console.log('✓ ปฏิทินจองวันหยุด — เริ่มพรุ่งนี้ ครบ 31 วัน ไม่มีวันซ้ำ/ขาด');
+}
+
+// 4.5.1 กติกาจองวันหยุดล่วงหน้า 4–28 วัน — หน้าเว็บกับฐานข้อมูลต้องใช้ตัวเลขชุดเดียวกัน
+{
+  const { futureDates, firstBookable, LEAVE_MIN_DAYS, LEAVE_MAX_DAYS } = await import('../src/dayoff.js');
+  const f = futureDates(TODAY, LEAVE_MAX_DAYS);
+  const plus = n => { const x = new Date(TODAY + 'T00:00:00'); x.setDate(x.getDate() + n); return isoDate(x); };
+  check('จองได้เร็วสุดล่วงหน้า 4 วัน', LEAVE_MIN_DAYS === 4 && firstBookable(f) === plus(4), `วันแรกที่จองได้ ${firstBookable(f)} ควรเป็น ${plus(4)}`);
+  check('จองได้ไกลสุด 28 วัน', LEAVE_MAX_DAYS === 28 && f[f.length - 1] === plus(28), `วันสุดท้าย ${f[f.length - 1]} ควรเป็น ${plus(28)}`);
+  const sql = readFileSync(new URL('../supabase/migrations/012_day_off_booking_window_4_days.sql', import.meta.url), 'utf8');
+  const mins = [...sql.matchAll(/off_date >= business_today\(\) \+ (\d+)/g)].map(m => +m[1]);
+  const maxs = [...sql.matchAll(/off_date <= business_today\(\) \+ (\d+)/g)].map(m => +m[1]);
+  check('ฐานข้อมูลใช้ 4 วันเหมือนหน้าเว็บ', mins.length === 2 && mins.every(n => n === LEAVE_MIN_DAYS), `policy ใช้ +${mins.join('/')} วัน`);
+  check('ฐานข้อมูลใช้ 28 วันเหมือนหน้าเว็บ', maxs.length === 2 && maxs.every(n => n === LEAVE_MAX_DAYS), `policy ใช้ +${maxs.join('/')} วัน`);
+  console.log('✓ จองวันหยุดล่วงหน้า 4–28 วัน — หน้าเว็บและฐานข้อมูลตรงกัน');
 }
 
 // 4.6 เงินสดค้างส่ง = ผลรวม (เงินสด − เงินทอน) ของวันที่ยังไม่ได้ส่ง
@@ -490,7 +508,8 @@ if (ownerHTML.pay && ownerHTML.pl) {
   // เปิดร้านขายทั้งวันแต่ไม่มีการลงเวลาเลย ก็ถือว่าลืม
   const soldNoClock = calc.payrollFor({
     branch: { staff_name: 'ทดสอบ', base_salary: 9000, days_off_quota: 31, holiday_work_days: 0 },
-    records: [{ record_date: dates[0], staff_name: 'ทดสอบ', sent: true, yen: 0, pan: 0, cash: 0, float_cash: 0 }],
+    // created_by = ส่งยอดผ่านแอป (ถ้าไม่มี created_by = ยอด Excel ย้อนหลัง ซึ่งตั้งใจไม่หักลืมลงเวลา — ดูเทส 4.4)
+    records: [{ record_date: dates[0], staff_name: 'ทดสอบ', sent: true, yen: 0, pan: 0, cash: 0, float_cash: 0, created_by: 'u-lnd' }],
     clocksByDate: {}, allDatesInMonth: dates, todayISO: TODAY, cfg,
   });
   check('ขายแต่ไม่ลงเวลาเลย หัก 40', soldNoClock.deduct === 40, `หัก ${soldNoClock.deduct} บาท`);
@@ -682,6 +701,44 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('พิมพ์ราคาบิลแก้ไขแบบมีคอมม่าแล้วบันทึกได้', purchaseAfter.total_price === 3300,
     `ได้ total_price = ${purchaseAfter.total_price} (คาดว่า 3300 — ถ้าไม่ตรงแปลว่าคอมม่าไม่ถูกล้างก่อนแปลงเป็นตัวเลข)`);
   console.log('✓ แก้บิลนำเข้าผ่านหน้าจอจริง — พิมพ์ราคาแบบมีคอมม่าบันทึกถูกต้อง');
+}
+
+// 4.22.3 หัวหน้าบันทึกบิลซื้อผ่านหน้าจอจริง — ไม่เปลี่ยนรายการ (ใช้รายการแรกที่ขึ้นอยู่) และพิมพ์ราคามีคอมม่า
+{
+  root.innerHTML = '<div id="roleRoot"></div>';
+  const relief3 = await import('../src/pages/relief.js?v=3');
+  await relief3.renderReliefApp(document.getElementById('roleRoot'), db.employees.find(e => e.id === 'u-rel'));
+  await new Promise(r => setTimeout(r, 120));
+  document.querySelector('[data-rtab="pack"]').click();
+  await new Promise(r => setTimeout(r, 160));
+  document.querySelector('[data-round="wh"]').click();
+  await new Promise(r => setTimeout(r, 200));
+  document.getElementById('purchToggleBtn').click();
+  await new Promise(r => setTimeout(r, 40));
+  const firstItem = db.stock_items[0];
+  const before = db.purchases.length;
+  const qty = document.getElementById('purchQty'), price = document.getElementById('purchPrice');
+  qty.value = '2'; qty.dispatchEvent(new dom.window.Event('input'));
+  price.value = '2,400'; price.dispatchEvent(new dom.window.Event('input'));
+  document.getElementById('purchSubmitBtn').click();
+  await new Promise(r => setTimeout(r, 120));
+  const added = db.purchases[db.purchases.length - 1];
+  check('หัวหน้าบันทึกบิลซื้อได้โดยไม่ต้องเปลี่ยนรายการ', db.purchases.length === before + 1 && added.item_id === firstItem.id,
+    db.purchases.length === before ? 'ไม่มีบิลเกิดขึ้น (รายการแรกที่ขึ้นอยู่บนจอไม่ถูกเลือกจริง หรือราคาถูกอ่านเป็น 0)' : `บันทึกเป็นรายการ ${added.item_id}`);
+  check('หัวหน้าพิมพ์ราคามีคอมม่าได้', added && Number(added.total_price) === 2400, `ราคาที่บันทึก ${added && added.total_price}`);
+  console.log('✓ หัวหน้าบันทึกบิลซื้อ — รายการแรกเลือกได้ทันที และพิมพ์ราคามีคอมม่าได้');
+
+  // นับสต๊อกคลังกลาง พิมพ์ผิด (ตัว o แทนเลข 0) ต้องเตือน ไม่ใช่บันทึกทับเป็น 0 ลัง
+  document.querySelector('[data-round="wh"]').click();
+  await new Promise(r => setTimeout(r, 200));
+  const whRow = db.warehouse_stock.find(w => w.item_id === firstItem.id);
+  const casesBefore = whRow.case_qty;
+  const inp = document.querySelector(`[data-whcount="${firstItem.id}"]`);
+  inp.value = '1o'; inp.dispatchEvent(new dom.window.Event('input'));
+  document.getElementById('whSaveBtn').click();
+  await new Promise(r => setTimeout(r, 120));
+  check('พิมพ์ผิดในช่องนับสต๊อกต้องไม่กลายเป็น 0', whRow.case_qty === casesBefore, `สต๊อกเปลี่ยนจาก ${casesBefore} เป็น ${whRow.case_qty} ลัง`);
+  console.log('✓ นับสต๊อกคลังกลาง — พิมพ์ผิดแล้วเตือน ไม่บันทึกทับเป็น 0');
 }
 
 // 4.23 ออกบิลขายนอก — ตัดสต๊อกจริงและกันขายเกินของที่มี
