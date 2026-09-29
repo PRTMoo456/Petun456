@@ -5,7 +5,7 @@ import { getSettings, loadSettings, invalidateSettings } from '../settings.js';
 import { $, N, numIn, numSet, baht, signed, esc, toast, todayISO, isoDate, fmtDate, monthKey, monthLabel, monthDates, DAYS } from '../util.js';
 import { loadRefs, invalidateRefs } from '../refs.js';
 import { futureDates } from '../dayoff.js';
-import { whAvailMap, issueExternalSale, editExternalSale } from '../warehouse.js';
+import { whAvailMap, issueExternalSale, editExternalSale, editPurchase } from '../warehouse.js';
 import { loadPeople, peopleCardHTML, bindPeopleCard } from './people.js';
 import { getCompanies, deliveryReportHTML, deliveryMonthHTML, externalBillHTML, externalMonthHTML, staffSlipHTML, reliefSlipHTML, printDoc } from '../print.js';
 import { CLOSE_REASON_OPTIONS, closeStore, closeFormHTML, defaultDraft, draftFromRecord, validateClose, submitClose, updateClose, updateClosure, cancelClosure } from '../close.js';
@@ -14,7 +14,7 @@ import * as calc from '../calc.js';
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
 let monthPayrollCache = null;
 let tabLoadTicket = 0;
-let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
+let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, purchaseEditing: null, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
  
 export async function renderOwnerApp(root, me) {
   ME = me; TODAY = todayISO();
@@ -903,8 +903,19 @@ async function renderPL(body) {
  
   const purchRows = (purchases || []).map(p => {
     const it = STOCK_ITEMS.find(x => x.id === p.item_id);
-    return `<tr><td>${fmtDate(p.purchase_date)}</td><td>${esc(it ? it.name : '—')}</td><td class="n">${p.case_qty} ลัง</td>
-      <td class="n">${baht(p.total_price)}</td><td class="n">${Number(p.cost_per_unit).toFixed(2)}</td><td class="sub">${esc(p.note || '')}</td></tr>`;
+    const editing = S.purchaseEditing === p.id;
+    const head = `<tr><td>${fmtDate(p.purchase_date)}</td><td>${esc(it ? it.name : '—')}</td><td class="n">${p.case_qty} ลัง</td>
+      <td class="n">${baht(p.total_price)}</td><td class="n">${Number(p.cost_per_unit).toFixed(2)}</td><td class="sub">${esc(p.note || '')}</td>
+      <td class="n"><button class="mini" data-purchedit="${p.id}">${editing ? 'ปิด' : 'แก้ไข'}</button></td></tr>`;
+    if (!editing) return head;
+    return head + `<tr class="detailrow"><td colspan="7" style="text-align:left;background:var(--surface-2)"><div style="padding:10px 4px">
+      <p class="sub" style="margin:0 0 8px">แก้เฉพาะบิลนี้ · ระบบจะปรับสต๊อกและต้นทุนเฉลี่ยจากส่วนต่างให้อัตโนมัติ</p>
+      <div class="row" style="gap:10px;align-items:end;flex-wrap:wrap">
+        <div class="field" style="margin:0"><label>วันที่นำเข้า</label><input type="date" value="${p.purchase_date}" data-purchdate="${p.id}"></div>
+        <div class="field" style="margin:0"><label>จำนวน (ลัง)</label><input value="${p.case_qty}" inputmode="numeric" data-purchqty="${p.id}" style="width:90px"></div>
+        <div class="field" style="margin:0"><label>ราคารวม (บาท)</label><input value="${p.total_price}" inputmode="decimal" data-purchprice="${p.id}" style="width:120px"></div>
+        <button class="btn primary" data-purchsave="${p.id}">บันทึกการแก้ไข</button>
+      </div></div></td></tr>`;
   }).join('');
   const repairRows = (repairs || []).map(r => {
     const b = BRANCHES.find(x => x.id === r.branch_id);
@@ -970,9 +981,9 @@ async function renderPL(body) {
     <p class="foot" style="margin-bottom:16px">ออกบิลได้ทั้งที่นี่และหน้าหัวหน้า → แท็บ "ขายนอก" · กด <b>แก้ไข</b> เพื่อแก้จำนวนย้อนหลังหรือยกเลิกบิล — ระบบคืน/ตัดสต๊อกคลังกลางตามส่วนต่างให้เอง และจดไว้ในประวัติการแก้ไข</p>
  
     <h3 style="margin:22px 0 10px">บิลนำเข้าสินค้าล่าสุด</h3>
-    <div class="tablewrap" style="margin-bottom:16px"><table><thead><tr><th>วันที่</th><th>วัตถุดิบ</th><th>จำนวน</th><th>ราคารวม</th><th>ทุน/หน่วย</th><th>หมายเหตุ</th></tr></thead>
-      <tbody>${purchRows || '<tr><td colspan="6" class="sub">ยังไม่มีบิล</td></tr>'}</tbody></table></div>
-    <p class="foot" style="margin-bottom:16px">บันทึกบิลซื้อได้ที่หน้าหัวหน้า → แท็บ "รอบส่งของ" → "เช็คสต๊อก"</p>
+    <div class="tablewrap" style="margin-bottom:16px"><table><thead><tr><th>วันที่</th><th>วัตถุดิบ</th><th>จำนวน</th><th>ราคารวม</th><th>ทุน/หน่วย</th><th>หมายเหตุ</th><th></th></tr></thead>
+      <tbody>${purchRows || '<tr><td colspan="7" class="sub">ยังไม่มีบิล</td></tr>'}</tbody></table></div>
+    <p class="foot" style="margin-bottom:16px">บันทึกบิลซื้อได้ที่หน้าหัวหน้า → แท็บ "รอบส่งของ" → "เช็คสต๊อก" · เจ้าของแก้วันที่ จำนวน และราคาได้จากปุ่ม <b>แก้ไข</b></p>
  
     <h3 style="margin:22px 0 10px">ค่าซ่อม/บำรุงรักษา</h3>
     <div class="card pad" style="margin-bottom:16px">
@@ -992,6 +1003,22 @@ async function renderPL(body) {
     const companies = await getCompanies();
     const html = externalBillHTML({ sale, issuerName: issuerNames[sale.issuer], stockItems: STOCK_ITEMS, companies, viewerRole: 'owner' });
     printDoc(html, 'ไม่พบบิลนี้');
+  }));
+  body.querySelectorAll('[data-purchedit]').forEach(btn => btn.addEventListener('click', () => {
+    S.purchaseEditing = S.purchaseEditing === btn.dataset.purchedit ? null : btn.dataset.purchedit;
+    renderPL(body);
+  }));
+  body.querySelectorAll('[data-purchsave]').forEach(btn => btn.addEventListener('click', async () => {
+    const id = btn.dataset.purchsave;
+    const caseQty = Number(body.querySelector(`[data-purchqty="${id}"]`).value);
+    const totalPrice = Number(body.querySelector(`[data-purchprice="${id}"]`).value);
+    const purchaseDate = body.querySelector(`[data-purchdate="${id}"]`).value;
+    btn.disabled = true;
+    const res = await editPurchase({ purchaseId: id, purchaseDate, caseQty, totalPrice });
+    if (res.error) { btn.disabled = false; toast(res.error); return; }
+    toast(`แก้บิลนำเข้าแล้ว — สต๊อกคงเหลือ ${res.stock_units} ${res.unit || 'หน่วย'} · ทุนเฉลี่ย ${Number(res.avg_cost).toFixed(2)} บาท`);
+    S.purchaseEditing = null;
+    renderPL(body);
   }));
   body.querySelectorAll('[data-extpaid]').forEach(btn => btn.addEventListener('click', async () => {
     const sale = (externalSales || []).find(x => x.id === btn.dataset.extpaid); if (!sale) return;

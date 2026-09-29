@@ -64,3 +64,18 @@ export async function editExternalSale({ sale, draftQty, stockItems, avail, byNa
   if (error) return { error: 'บันทึกไม่สำเร็จ: ' + error.message };
   return { changes: changes.length, cancelled: items.length === 0, total: N(data?.total) };
 }
+
+/* แก้บิลซื้อย้อนหลัง (เฉพาะเจ้าของ) ใน transaction เดียวกับการปรับสต๊อก */
+export async function editPurchase({ purchaseId, purchaseDate, caseQty, totalPrice }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate || '')) return { error: 'กรอกวันที่นำเข้าให้ถูกต้อง' };
+  if (!Number.isInteger(caseQty) || caseQty <= 0) return { error: 'จำนวนลังต้องเป็นจำนวนเต็มมากกว่า 0' };
+  if (!Number.isFinite(totalPrice) || totalPrice <= 0) return { error: 'กรอกราคารวมให้ถูกต้อง' };
+  const { data, error } = await supabase.rpc('edit_warehouse_purchase', {
+    p_purchase_id: purchaseId,
+    p_purchase_date: purchaseDate,
+    p_case_qty: caseQty,
+    p_total_price: totalPrice,
+  });
+  if (error) return { error: 'บันทึกไม่สำเร็จ: ' + error.message };
+  return data || {};
+}

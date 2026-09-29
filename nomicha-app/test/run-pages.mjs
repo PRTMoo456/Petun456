@@ -627,6 +627,32 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log('✓ แก้ไข/ยกเลิกบิลขายนอกสาขา — คืน/ตัดสต๊อกคลังกลางตามส่วนต่างถูกต้อง และกันแก้เกินของที่มี');
 }
 
+// 4.22.1 แก้บิลนำเข้า — ปรับเฉพาะส่วนต่างของบิลเป้าหมาย ไม่เปลี่ยนต้นทุนที่ snapshot ในรายการเก่า
+{
+  check('มีปุ่มแก้บิลนำเข้า', /data-purchedit="p1"/.test(ownerHTML.pl || ''), 'ไม่พบปุ่มแก้ไขในตารางบิลนำเข้า');
+  const wh = await import('../src/warehouse.js');
+  const purchase = db.purchases.find(p => p.id === 'p1');
+  db.purchases.push({ ...purchase, id: 'p-other', note: 'บิลอื่น' });
+  const otherBefore = JSON.stringify(db.purchases.find(p => p.id === 'p-other'));
+  const historyBefore = JSON.stringify(db.external_sales);
+  const item = db.stock_items.find(i => i.id === purchase.item_id);
+  const stock = db.warehouse_stock.find(s => s.item_id === purchase.item_id);
+  const beforeUnits = stock.case_qty * item.per_case + stock.loose_qty;
+  const beforeValue = beforeUnits * stock.avg_cost;
+  const oldTotal = purchase.total_price;
+  const newDate = TODAY.slice(0, 8) + '01';
+  const res = await wh.editPurchase({ purchaseId: purchase.id, purchaseDate: newDate, caseQty: purchase.case_qty + 1, totalPrice: 1800 });
+  check('แก้บิลนำเข้าสำเร็จ', !res.error, res.error || '');
+  const afterUnits = stock.case_qty * item.per_case + stock.loose_qty;
+  check('ปรับจำนวนคงเหลือตามส่วนต่าง', afterUnits === beforeUnits + item.per_case, `ก่อน ${beforeUnits} หลัง ${afterUnits}`);
+  check('คำนวณมูลค่าสต๊อกใหม่', Math.abs(afterUnits * stock.avg_cost - (beforeValue + 1800 - oldTotal)) < 0.2,
+    `มูลค่าที่ได้ ${afterUnits * stock.avg_cost}`);
+  check('แก้วันที่และราคาบิล', purchase.purchase_date === newDate && purchase.total_price === 1800, `ได้ ${purchase.purchase_date}/${purchase.total_price}`);
+  check('ไม่แก้บิลอื่นย้อนหลัง', JSON.stringify(db.purchases.find(p => p.id === 'p-other')) === otherBefore, 'บิลอื่นถูกเปลี่ยน');
+  check('ไม่แก้ต้นทุนรายการขายเก่า', JSON.stringify(db.external_sales) === historyBefore, 'ประวัติรายการขายถูกเปลี่ยน');
+  console.log('✓ แก้บิลนำเข้า — ปรับจำนวน/มูลค่าสต๊อกถูกต้อง และไม่แตะประวัติรายการอื่น');
+}
+
 // 4.23 ออกบิลขายนอก — ตัดสต๊อกจริงและกันขายเกินของที่มี
 {
   const wh = await import('../src/warehouse.js');
