@@ -79,3 +79,18 @@ export async function editPurchase({ purchaseId, purchaseDate, caseQty, totalPri
   if (error) return { error: 'บันทึกไม่สำเร็จ: ' + error.message };
   return data || {};
 }
+
+/* บันทึกบิลซื้อเข้าคลัง — เพิ่มสต๊อกและคำนวณต้นทุนเฉลี่ยใน transaction เดียว */
+export async function recordPurchase({ item, caseQty, totalPrice }) {
+  if (!item) return { error: 'เลือกรายการสินค้าก่อน' };
+  if (!Number.isInteger(caseQty) || caseQty <= 0) return { error: 'จำนวนที่ซื้อต้องเป็นลังเต็มจำนวนตั้งแต่ 1 ขึ้นไป' };
+  if (!Number.isFinite(totalPrice) || totalPrice <= 0) return { error: 'กรอกราคารวมที่จ่ายให้ถูกต้อง' };
+  const { data, error } = await supabase.rpc('record_warehouse_purchase', {
+    p_item_id: item.id,
+    p_case_qty: caseQty,
+    p_total_price: totalPrice,
+    p_note: `บิลซื้อ${item.name} ${caseQty} ลัง`,
+  });
+  if (error) return { error: 'บันทึกบิลไม่สำเร็จ: ' + error.message };
+  return data || {};
+}

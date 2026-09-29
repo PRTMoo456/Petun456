@@ -629,8 +629,18 @@ if (ownerHTML.pay && ownerHTML.pl) {
 
 // 4.22.1 แก้บิลนำเข้า — ปรับเฉพาะส่วนต่างของบิลเป้าหมาย ไม่เปลี่ยนต้นทุนที่ snapshot ในรายการเก่า
 {
+  check('เจ้าของมีช่องเพิ่มบิลนำเข้า', /id="ownPurchToggle"/.test(ownerHTML.pl || ''), 'ไม่พบปุ่มเพิ่มบิลนำเข้าในหน้ากำไรขาดทุน');
   check('มีปุ่มแก้บิลนำเข้า', /data-purchedit="p1"/.test(ownerHTML.pl || ''), 'ไม่พบปุ่มแก้ไขในตารางบิลนำเข้า');
   const wh = await import('../src/warehouse.js');
+  const addItem = db.stock_items[0];
+  const addStock = db.warehouse_stock.find(s => s.item_id === addItem.id);
+  const addBeforeUnits = addStock.case_qty * addItem.per_case + addStock.loose_qty;
+  const addBeforePurchases = db.purchases.length;
+  const added = await wh.recordPurchase({ item: addItem, caseQty: 2, totalPrice: 2400 });
+  check('เพิ่มบิลนำเข้าสำเร็จ', !added.error, added.error || '');
+  check('เพิ่มสต๊อกตามจำนวนในบิล', addStock.case_qty * addItem.per_case + addStock.loose_qty === addBeforeUnits + 2 * addItem.per_case, 'สต๊อกไม่เพิ่มตามบิล');
+  check('สร้างประวัติบิลใหม่', db.purchases.length === addBeforePurchases + 1, 'ไม่พบประวัติบิลใหม่');
+  check('กันจำนวนลังไม่ถูกต้อง', !!(await wh.recordPurchase({ item: addItem, caseQty: 0, totalPrice: 100 })).error, 'ยอมให้บันทึก 0 ลัง');
   const purchase = db.purchases.find(p => p.id === 'p1');
   db.purchases.push({ ...purchase, id: 'p-other', note: 'บิลอื่น' });
   const otherBefore = JSON.stringify(db.purchases.find(p => p.id === 'p-other'));
