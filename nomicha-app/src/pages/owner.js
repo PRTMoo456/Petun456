@@ -1,7 +1,7 @@
 // หน้าเจ้าของ — ภาพรวมวันนี้ / สรุปยอดสาขา (แก้ย้อนหลัง) / สต๊อก / เงินเดือน / กำไรขาดทุน / ตั้งค่า
 // พอร์ตตรงจาก ownerView()/ownToday()/ownDay()/ownStock*()/ownPay()/ownPL()/ownSet() ในต้นแบบ nomicha.html
 import { supabase } from '../supabaseClient.js';
-import { getSettings, loadSettings, invalidateSettings } from '../settings.js';
+import { getSettings, loadSettings, invalidateSettings, payrollSettingsAt } from '../settings.js';
 import { $, N, numIn, numSet, baht, signed, esc, toast, todayISO, isoDate, fmtDate, monthKey, monthLabel, monthDates, DAYS } from '../util.js';
 import { loadRefs, invalidateRefs } from '../refs.js';
 import { futureDates } from '../dayoff.js';
@@ -785,14 +785,20 @@ async function renderStockDeliveries(el, seg) {
 async function loadMonthPayroll() {
   const cacheKey = selMonth();
   if (monthPayrollCache && monthPayrollCache.key === cacheKey && Date.now() - monthPayrollCache.at < 30000) return monthPayrollCache.data;
-  const cfg = getSettings();
   const dates = selDates();
-  const [{ data: allRecords }, { data: allClocks }, { data: whRentRows }, { data: employees }] = await Promise.all([
+  const monthStart = dates[0];
+  const [{ data: allRecords }, { data: allClocks }, { data: whRentRows }, { data: employees },
+    { data: employeeHistory }, { data: branchHistory }, { data: rulesHistory }] = await Promise.all([
     supabase.from('daily_records').select('*').gte('record_date', dates[0]).lte('record_date', dates[dates.length - 1]),
     supabase.from('clock_records').select('*').gte('clock_date', dates[0]).lte('clock_date', dates[dates.length - 1]),
     supabase.from('warehouse_rent_history').select('*').order('effective_from'),
     supabase.from('employees').select('*'),
+    supabase.from('payroll_employee_history').select('*').lte('effective_month', monthStart).order('effective_month'),
+    supabase.from('payroll_branch_history').select('*').lte('effective_month', monthStart).order('effective_month'),
+    supabase.from('payroll_rules_history').select('*').lte('effective_month', monthStart).order('effective_month', { ascending: false }).limit(1),
   ]);
+  const cfg = payrollSettingsAt(getSettings(), rulesHistory?.[0]);
+  const lastOf = (rows, key, value) => (rows || []).filter(x => x[key] === value).slice(-1)[0];
   const clocksByDateAll = {}; BRANCHES.forEach(b => { clocksByDateAll[b.id] = {}; });
   (allClocks || []).forEach(c => { if (!clocksByDateAll[c.branch_id]) clocksByDateAll[c.branch_id] = {}; clocksByDateAll[c.branch_id][c.clock_date] = c; });
   const relief = (employees || []).find(e => e.role === 'relief');
@@ -800,25 +806,30 @@ async function loadMonthPayroll() {
  
   const payPeople = BRANCHES.map(b => {
     const emp = (employees || []).find(e => e.branch_id === b.id && e.role === 'staff');
+    const empPay = lastOf(employeeHistory, 'employee_id', emp?.id);
+    const branchPay = lastOf(branchHistory, 'branch_id', b.id);
+    const base = empPay?.base_salary ?? emp?.base_salary ?? 0;
+    const daysOffQuota = branchPay?.days_off_quota ?? b.days_off_quota;
     const records = (allRecords || []).filter(r => r.branch_id === b.id);
     const pr = calc.payrollFor({
-      branch: { relief_name: relief?.name, base_salary: emp?.base_salary ?? 0, days_off_quota: b.days_off_quota, holiday_work_days: b.holiday_work_days || 0 },
+      branch: { relief_name: relief?.name, base_salary: base, days_off_quota: daysOffQuota },
       records, clocksByDate: clocksByDateAll[b.id] || {}, allDatesInMonth: dates, todayISO: TODAY, cfg,
     });
-    return { key: b.id, b, records, emp, name: emp?.name || '(ยังไม่ผูกบัญชี)', place: b.name, base: emp?.base_salary ?? 0, pr };
+    return { key: b.id, b: { ...b, days_off_quota: daysOffQuota }, records, emp, name: emp?.name || '(ยังไม่ผูกบัญชี)', place: b.name, base, pr };
   });
+  const reliefPay = lastOf(employeeHistory, 'employee_id', relief?.id) || relief || {};
   const prR = calc.payrollForRelief({
-    relief: { name: relief?.name, base_salary: relief?.base_salary ?? 0, delivery_pay: relief?.delivery_pay ?? 0, start_date: relief?.start_date },
+    relief: { name: relief?.name, base_salary: reliefPay.base_salary ?? 0, delivery_pay: reliefPay.delivery_pay ?? 0, start_date: reliefPay.start_date },
     allBranchRecords: allRecords || [], allBranchClocksByDate: clocksByDateAll, todayISO: TODAY, cfg, whRent, monthEnd: dates[dates.length - 1],
   });
-  const data = { cfg, dates, allRecords: allRecords || [], clocksByDateAll, employees: employees || [], relief, whRent, payPeople, prR };
+  const data = { cfg, dates, allRecords: allRecords || [], clocksByDateAll, employees: employees || [], relief, reliefPay, whRent, payPeople, prR };
   monthPayrollCache = { key: cacheKey, at: Date.now(), data };
   return data;
 }
  
 async function renderPay(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
-  const [{ relief, payPeople, prR, dates: payDates, clocksByDateAll: payClocks, allRecords: payRecords }, { data: allRemits }, { data: headRemits }, { data: cashRecords }, { data: monthDayOffs }] = await Promise.all([
+  const [{ relief, reliefPay, payPeople, prR, dates: payDates, clocksByDateAll: payClocks, allRecords: payRecords }, { data: allRemits }, { data: headRemits }, { data: cashRecords }, { data: monthDayOffs }] = await Promise.all([
     loadMonthPayroll(),
     supabase.from('cash_remittances').select('*'),
     supabase.from('head_remittances').select('*'),
@@ -833,7 +844,7 @@ async function renderPay(body) {
       <td class="n" title="${p.pr.cups} แก้ว">${baht(p.pr.cupPay)}</td>
       <td class="n ${p.pr.deduct ? 'neg' : ''}" title="${[p.pr.daysOffTaken ? `ใช้วันหยุด ${p.pr.daysOffTaken}/${p.b.days_off_quota} วัน` : '', p.pr.late ? `สาย ${p.pr.late} นาที` : '', p.pr.early ? `ปิดไว ${p.pr.early} นาที` : '', p.pr.excess ? `หยุดเกินโควตา ${p.pr.excess} วัน` : ''].filter(Boolean).join(' · ') || 'ไม่มีรายการหัก'}">${p.pr.deduct ? '−' + baht(p.pr.deduct) : '0'}</td>
       <td class="n" style="font-weight:600">${baht(p.pr.total)}</td></tr>`).join('');
-  const reliefBaseAll = prR.notStarted ? 0 : (relief?.base_salary ?? 0) + (relief?.delivery_pay ?? 0) + prR.whRent;
+  const reliefBaseAll = prR.notStarted ? 0 : (reliefPay?.base_salary ?? 0) + (reliefPay?.delivery_pay ?? 0) + prR.whRent;
   const reliefRow = prR.notStarted
     ? `<tr><td>${esc(relief?.name || 'หัวหน้า')} <span class="sub">คลังกลาง</span></td><td colspan="5" class="sub" style="text-align:center">ยังไม่เริ่มงาน (เริ่ม ${fmtDate(prR.startDate)})</td><td class="n" style="font-weight:600">0</td></tr>`
     : `<tr><td>${esc(relief?.name || 'หัวหน้า')} <span class="sub">คลังกลาง</span></td>
@@ -871,7 +882,7 @@ async function renderPay(body) {
  
   body.innerHTML = `<div class="between" style="margin-bottom:14px;flex-wrap:wrap;gap:8px"><h3 style="margin:0">เงินเดือน — ${monthLabel(selMonth() + '-01')}</h3>
       <span class="row" style="gap:8px">${monthPickerHTML('payMonthSel')}<button class="mini" id="printAllSlipsBtn">ส่งออกสลิปทุกคน</button></span></div>
-    ${isThisMonth() ? '' : '<p class="sub" style="margin:-6px 0 10px">ดูย้อนหลัง — ฐานเงินเดือน/โควตาวันหยุด/เงินส่งของ ใช้ค่าที่ตั้งอยู่ตอนนี้</p>'}
+    ${isThisMonth() ? '' : '<p class="sub" style="margin:-6px 0 10px">ดูย้อนหลัง — ใช้เงินเดือน โควตาวันหยุด เงินส่งของ และกติกาจ่ายที่บันทึกไว้ของเดือนนั้น</p>'}
     <div class="tablewrap"><table>
       <thead><tr><th>พนักงาน</th><th>ฐานเงินเดือน</th><th>เบี้ยขยัน</th><th>ทำงานวันหยุด</th><th>ค่าแก้ว</th><th>หัก (ขาด/ลา/มาสาย)</th><th>เงินเดือนสุทธิ</th></tr></thead>
       <tbody>${staffRows}${reliefRow}</tbody></table></div>
@@ -914,7 +925,7 @@ async function renderPay(body) {
       { name: p.b.name, staff_name: p.name, first_name: p.emp?.first_name, last_name: p.emp?.last_name, national_id: nidOf(p.emp?.id),
         base_salary: p.base, holiday_work_days: p.b.holiday_work_days || 0 }, p.pr, mLabel, companies)).join('')
       + (prR.notStarted ? '' : reliefSlipHTML({ name: relief?.name || 'หัวหน้า', role: 'หัวหน้า', first_name: relief?.first_name, last_name: relief?.last_name,
-        national_id: nidOf(relief?.id), base_salary: relief?.base_salary ?? 0, delivery_pay: relief?.delivery_pay ?? 0 }, prR, mLabel, companies));
+        national_id: nidOf(relief?.id), base_salary: reliefPay?.base_salary ?? 0, delivery_pay: reliefPay?.delivery_pay ?? 0 }, prR, mLabel, companies));
     printDoc(html, 'ยังไม่มีสลิปให้ออก');
   });
   const hc = $('#ownerConfirmHeadBtn'); if (hc) hc.addEventListener('click', async () => {
@@ -963,7 +974,6 @@ async function renderPL(body) {
   });
   const totSales = rows.reduce((s, x) => s + x.x.sales, 0);
   const totMat = rows.reduce((s, x) => s + x.x.materialCost, 0);
-  const totRate = totSales > 0 ? totMat / totSales : 0;
   const totLabor = rows.reduce((s, x) => s + x.x.labor, 0);
   const totRent = rows.reduce((s, x) => s + x.x.rent, 0);
   const totRepair = rows.reduce((s, x) => s + x.x.repairs, 0);
@@ -975,6 +985,10 @@ async function renderPL(body) {
   // ยอดขายนอกสาขาที่เข้ากำไรคลังกลาง ต้องนับเฉพาะบิลของเดือนนี้ ให้ตรงกับช่วงเดียวกับการส่งของ/ค่าแรง
   const allExternal = (externalSales || []).filter(s => s.sale_date >= dates[0] && s.sale_date <= dates[dates.length - 1]).map(s => ({ items: s.items }));
   const wh = calc.warehousePL({ deliveries: allDeliveries, externalSales: allExternal, stockItemsById, avgCostById, reliefPayroll: prR });   // ยอดส่งของก่อนใช้แอปนับเฉพาะฝั่งสาขา ไม่นับเป็นยอดคลังกลาง (เจ้าของสั่ง 1 ต.ค. 69)
+  const whRate = wh.sales > 0 ? wh.cost / wh.sales : 0;
+  const companySales = totSales + wh.sales;
+  const companyMaterial = totMat + wh.cost;
+  const companyRate = companySales > 0 ? companyMaterial / companySales : 0;
   const companyNet = totNet + wh.net;
  
   const tbRows = rows.map(({ b, x }) => `<tr><td>${esc(b.name)}</td>
@@ -982,7 +996,7 @@ async function renderPL(body) {
       <td class="n">${baht(x.labor)}</td><td class="n">${baht(x.rent)}</td><td class="n">${x.repairs ? baht(x.repairs) : '–'}</td>
       <td class="n">${x.grabCommission ? baht(x.grabCommission) : '–'}</td>
       <td class="n ${x.net < 0 ? 'neg' : 'gain'}" style="font-weight:700">${signed(x.net)}</td></tr>`).join('')
-    + `<tr><td>คลังกลาง</td><td class="n">${baht(wh.sales)}</td><td class="n">${baht(wh.cost)}</td><td class="n">0.0%</td>
+    + `<tr><td>คลังกลาง</td><td class="n">${baht(wh.sales)}</td><td class="n">${baht(wh.cost)}</td><td class="n">${(whRate * 100).toFixed(1)}%</td>
       <td class="n">${baht(wh.headLabor)}</td><td class="n">–</td><td class="n">–</td><td class="n">–</td>
       <td class="n ${wh.net < 0 ? 'neg' : 'gain'}" style="font-weight:700">${signed(wh.net)}</td></tr>`;
  
@@ -1045,8 +1059,8 @@ async function renderPL(body) {
     <div class="tablewrap"><table class="pltable">
       <thead><tr><th>สาขา</th><th>ยอดขาย</th><th>ต้นทุนวัตถุดิบ</th><th>อัตราการใช้วัตถุดิบ</th><th>ค่าแรง</th><th>ค่าเช่า</th><th>ค่าซ่อม</th><th>ค่าคอมแกร๊บ</th><th>กำไร/ขาดทุน</th></tr></thead>
       <tbody>${tbRows}</tbody>
-      <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td>รวม</td><td class="n">${baht(totSales + wh.sales)}</td><td class="n">${baht(totMat + wh.cost)}</td>
-        <td class="n">${(totRate * 100).toFixed(1)}%</td><td class="n">${baht(totLabor + wh.headLabor)}</td><td class="n">${baht(totRent)}</td>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td>รวม</td><td class="n">${baht(companySales)}</td><td class="n">${baht(companyMaterial)}</td>
+        <td class="n">${(companyRate * 100).toFixed(1)}%</td><td class="n">${baht(totLabor + wh.headLabor)}</td><td class="n">${baht(totRent)}</td>
         <td class="n">${baht(totRepair)}</td><td class="n">${baht(totGrabComm)}</td><td class="n ${companyNet < 0 ? 'neg' : 'gain'}">${signed(companyNet)}</td></tr></tfoot></table></div>
     ${manualDlv.length ? `<p class="foot">ต้นทุนวัตถุดิบเดือนนี้รวมยอดส่งของก่อนเริ่มใช้แอป ${baht(manualDlv.reduce((t, m) => t + N(m.amount), 0))} บาท (${[...new Set(manualDlv.map(m => (BRANCHES.find(b => b.id === m.branch_id) || {}).name || m.branch_id))].join(' · ')})</p>` : ''}
     <p class="foot">"อัตราการใช้วัตถุดิบ" = ต้นทุนวัตถุดิบ ÷ ยอดขาย · ค่าคอมแกร๊บใช้อัตราที่บันทึกไว้ของแต่ละวัน ·

@@ -9,7 +9,7 @@
 // พนักงานแก้ยอดที่ส่งแล้วได้ภายในวันเดียวกัน ทุกครั้งเก็บประวัติ ส่วนวันย้อนหลังให้เจ้าของแก้เท่านั้น
 import { supabase } from '../supabaseClient.js';
 import { loadRefs } from '../refs.js';
-import { getSettings } from '../settings.js';
+import { getSettings, payrollSettingsAt } from '../settings.js';
 import { $, N, numIn, numIn0, baht, esc, toast, todayISO, nowHM, fmtDate, monthKey, monthLabel, monthDates } from '../util.js';
 import { quotaReport, dayChip, OFF_LEGEND, quotaHTML, futureDates, LEAVE_MIN_DAYS, LEAVE_MAX_DAYS, LEAVE_WINDOW_TEXT, firstBookable } from '../dayoff.js';
 import { getCompanies, staffSlipHTML, printDoc } from '../print.js';
@@ -338,21 +338,27 @@ function meTab(ctx) {
 let meMonth = 'this';
 async function loadMeTab(ctx) {
   const box = $('#meBox'); if (!box) return;
-  const cfg = getSettings();
   const isPrev = meMonth === 'prev';
   const firstOfSel = isPrev
     ? (() => { const d = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 2, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01'; })()
     : TODAY;
   const dates = monthDates(firstOfSel);
   const monthStart = dates[0];
-  const [{ data: records }, { data: clocks }, { data: reliefName }] = await Promise.all([
+  const [{ data: records }, { data: clocks }, { data: reliefName }, { data: employeeHistory },
+    { data: branchHistory }, { data: rulesHistory }] = await Promise.all([
     supabase.from('daily_records').select('*').eq('branch_id', BRANCH.id).gte('record_date', monthStart).lte('record_date', dates[dates.length - 1]),
     supabase.from('clock_records').select('*').eq('branch_id', BRANCH.id).gte('clock_date', monthStart).lte('clock_date', dates[dates.length - 1]),
     supabase.rpc('relief_name'),   // กันวันที่หัวหน้ามาทำแทนออกจากยอดของสาขา (ดู calc.payrollFor)
+    supabase.from('payroll_employee_history').select('*').eq('employee_id', ME.id).lte('effective_month', monthStart).order('effective_month', { ascending: false }).limit(1),
+    supabase.from('payroll_branch_history').select('*').eq('branch_id', BRANCH.id).lte('effective_month', monthStart).order('effective_month', { ascending: false }).limit(1),
+    supabase.from('payroll_rules_history').select('*').lte('effective_month', monthStart).order('effective_month', { ascending: false }).limit(1),
   ]);
+  const cfg = payrollSettingsAt(getSettings(), rulesHistory?.[0]);
+  const baseSalary = employeeHistory?.[0]?.base_salary ?? N(ME.base_salary);
+  const daysOffQuota = branchHistory?.[0]?.days_off_quota ?? BRANCH.days_off_quota;
   const clocksByDate = {}; (clocks || []).forEach(c => { clocksByDate[c.clock_date] = c; });
   const pr = calc.payrollFor({
-    branch: { relief_name: reliefName || '', base_salary: N(ME.base_salary), days_off_quota: BRANCH.days_off_quota, holiday_work_days: BRANCH.holiday_work_days || 0 },
+    branch: { relief_name: reliefName || '', base_salary: baseSalary, days_off_quota: daysOffQuota },
     records: records || [], clocksByDate, allDatesInMonth: dates, todayISO: TODAY, cfg,
   });
   const rows = (clocks || []).filter(c => c.staff_name !== reliefName).slice().sort((a, b) => b.clock_date < a.clock_date ? -1 : 1).slice(0, isPrev ? 31 : 15).map(c => {
@@ -374,14 +380,14 @@ async function loadMeTab(ctx) {
       <div class="between" style="margin-bottom:2px"><div class="eyebrow">${isPrev ? `สรุปเงินเดือน ${monthLabel(dates[0])}` : 'สรุปเงินเดือน (ประมาณการเดือนนี้)'}</div>
         <button class="mini" id="printSlipBtn">ปริ้นสลิป</button></div>
       <div class="bigtime" style="margin:6px 0 2px">${baht(pr.total)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
-      <div class="sub" style="margin-bottom:10px">${isPrev ? 'ยอดสุทธิของเดือนนี้ · จ่ายวันที่ 5 (ถ้าเจ้าของแก้ยอดย้อนหลัง ตัวเลขอาจเปลี่ยน)' : 'ยอดสุทธิโดยประมาณ · จ่ายจริงทุกวันที่ 5'}</div>
+      <div class="sub" style="margin-bottom:10px">${isPrev ? `ยอดสุทธิของ ${monthLabel(dates[0])} · จ่ายวันที่ 5 (ถ้าเจ้าของแก้ยอดย้อนหลัง ตัวเลขอาจเปลี่ยน)` : 'ยอดสุทธิโดยประมาณ · จ่ายจริงทุกวันที่ 5'}</div>
       <div class="payrows">
-        <div class="payrow"><span>เงินเดือนฐาน</span><span class="n">${baht(N(ME.base_salary))}</span></div>
+        <div class="payrow"><span>เงินเดือนฐาน</span><span class="n">${baht(baseSalary)}</span></div>
         <div class="payrow"><span>เบี้ยขยัน${pr.reset ? ' <span class="sub" style="color:var(--bad)">— โดนรีเซ็ตเดือนนี้</span>' : ''}</span><span class="n">${baht(pr.diligence)}</span></div>
         ${pr.holidayPay ? `<div class="payrow"><span>ค่าทำงานวันหยุด (${pr.holidays} ครั้ง)</span><span class="n">${baht(pr.holidayPay)}</span></div>`
           : pr.holidayPending ? `<div class="payrow"><span>ค่าทำงานวันหยุด <span class="sub">— ยังเหลือวันหยุด ${pr.unusedDaysOff} วัน คิดให้ตอนสิ้นเดือน</span></span><span class="n">–</span></div>` : ''}
         <div class="payrow"><span>ค่าแก้ว (${pr.cups} ใบ)</span><span class="n">${baht(pr.cupPay)}</span></div>
-        <div class="payrow"><span>ใช้โควตาวันหยุด</span><span class="n">${pr.daysOffTaken} / ${BRANCH.days_off_quota} วัน</span></div>
+        <div class="payrow"><span>ใช้โควตาวันหยุด</span><span class="n">${pr.daysOffTaken} / ${daysOffQuota} วัน</span></div>
         ${pr.deduct ? `<div class="payrow neg"><span>หัก สาย ${pr.late} น. / ปิดไว ${pr.early} น.${pr.excess ? ` / หยุดเกิน ${pr.excess} วัน` : ''}</span><span class="n">−${baht(pr.deduct)}</span></div>` : ''}
       </div>
       <div class="note" style="margin-top:10px">ผ่อนผันมาสายรวมปิดไวได้ไม่เกิน ${cfg.diligenceRules.lateAllowance} นาที/เดือน เกินแล้วเบี้ยขยันเป็น 0</div>
@@ -400,7 +406,7 @@ async function loadMeTab(ctx) {
       supabase.from('employee_private').select('*').eq('employee_id', ME.id).maybeSingle(),   // อ่านได้เฉพาะของตัวเอง
     ]);
     const html = staffSlipHTML({ name: BRANCH.name, staff_name: ME.name, first_name: ME.first_name, last_name: ME.last_name,
-      national_id: mine?.national_id || '', base_salary: N(ME.base_salary), holiday_work_days: BRANCH.holiday_work_days || 0 },
+      national_id: mine?.national_id || '', base_salary: baseSalary },
       pr, monthLabel(dates[dates.length - 1]), companies);
     printDoc(html, 'ยังไม่มีสลิปให้ออก');
   });

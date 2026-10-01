@@ -789,6 +789,10 @@ if (ownerHTML.pay && ownerHTML.pl) {
   const d = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 2, 1);
   const prevMk = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
   const prevLabel = util.monthLabel(prevMk + '-01');
+  // ตั้งค่าปัจจุบันให้ต่างจากประวัติ เพื่อจับว่าหน้าย้อนหลังเลือกค่าของเดือนนั้นจริง
+  db.payroll_employee_history.push({ employee_id: 'u-lnd', effective_month: prevMk + '-01', base_salary: 7777, delivery_pay: 0 });
+  db.payroll_branch_history.push({ branch_id: 'lnd', effective_month: prevMk + '-01', days_off_quota: 3 });
+  db.payroll_rules_history.push({ effective_month: prevMk + '-01', diligence_rules: { step: 400, cap: 1200, lateAllowance: 250 }, holiday_pay_scale: [300,350,400,450], pay_rules: { cupPay: 2, latePerMin: 1, earlyPerMin: 1, excessDayOff: 330 } });
   // ยอดของเดือนก่อน ต้องเข้าเงินเดือนเมื่อเลือกเดือนก่อน และไม่เข้าเดือนนี้
   document.querySelector('[data-otab="pay"]').click();
   await new Promise(r => setTimeout(r, 160));
@@ -798,6 +802,8 @@ if (ownerHTML.pay && ownerHTML.pl) {
     sel.value = prevMk; sel.dispatchEvent(new dom.window.Event('change'));
     await new Promise(r => setTimeout(r, 160));
     check('หัวข้อเงินเดือนเปลี่ยนเป็นเดือนที่เลือก', document.getElementById('ownBody').innerHTML.includes(`เงินเดือน — ${prevLabel}`), 'หัวข้อไม่เปลี่ยน');
+    const lndPayRow = [...document.querySelectorAll('#ownBody table tbody tr')].find(tr => tr.cells[0]?.textContent.includes('ตาล'));
+    check('เงินเดือนย้อนหลังใช้ฐานของเดือนนั้น', lndPayRow?.cells[1]?.textContent.replace(/,/g, '').trim() === '7777', lndPayRow?.textContent || 'ไม่พบแถว');
   }
   {
     const html = document.getElementById('ownBody').innerHTML;
@@ -835,6 +841,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('ยอดส่งของก่อนใช้แอปบวกเข้าต้นทุนวัตถุดิบ', matOf() === m0 + 3500, `ก่อน ${m0} หลัง ${matOf()}`);
   check('ไม่มีปุ่มเพิ่ม/ลบยอดในหน้าจอ', !document.getElementById('mdToggleBtn') && !document.querySelector('[data-mddel]'), 'ยังมีปุ่ม');
   db.manual_deliveries.length = 0;
+  db.payroll_employee_history.length = 0; db.payroll_branch_history.length = 0; db.payroll_rules_history.length = 0;
   console.log('✓ เลือกเดือนย้อนหลัง — เงินเดือนและกำไร/ขาดทุนเปลี่ยนตามเดือนที่เลือก');
 }
 

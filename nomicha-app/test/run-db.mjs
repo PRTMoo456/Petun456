@@ -144,6 +144,30 @@ const getRec = async (n) => (await pg.query(`select * from daily_records where b
   console.log('✓ ขั้นต่ำคลังกลาง — ถุงคู่ 10 · โอวัลติน 5 · นมจืด 200 · ชาพีช/กุหลาบ/มะลิ 2');
 }
 
+// ---------- 7. ค่าคำนวณเงินเดือนแยกตามเดือน ----------
+{
+  const thisMonth = (await pg.query(`select date_trunc('month',business_today())::date m`)).rows[0].m;
+  await pg.exec(`update employees set base_salary=12345 where id='${STAFF}'`);
+  const empHist = (await pg.query(`select * from payroll_employee_history where employee_id='${STAFF}' and effective_month=$1`, [thisMonth])).rows[0];
+  check('แก้เงินเดือนแล้วเก็บประวัติเดือนปัจจุบัน', Number(empHist?.base_salary) === 12345, JSON.stringify(empHist));
+
+  await pg.exec(`update branches set days_off_quota=3 where id='bdt'`);
+  const branchHist = (await pg.query(`select * from payroll_branch_history where branch_id='bdt' and effective_month=$1`, [thisMonth])).rows[0];
+  check('แก้โควตาแล้วเก็บประวัติเดือนปัจจุบัน', branchHist?.days_off_quota === 3, JSON.stringify(branchHist));
+
+  await pg.exec(`update settings set value='{"cupPay":2,"latePerMin":1,"earlyPerMin":1,"excessDayOff":330}'::jsonb where key='pay_rules'`);
+  const ruleHist = (await pg.query(`select * from payroll_rules_history where effective_month=$1`, [thisMonth])).rows[0];
+  check('แก้กติกาแล้วเก็บประวัติเดือนปัจจุบัน', Number(ruleHist?.pay_rules?.cupPay) === 2, JSON.stringify(ruleHist));
+
+  const oldMonth = (await pg.query(`select ($1::date - interval '1 month')::date m`, [thisMonth])).rows[0].m;
+  await pg.query(`insert into payroll_employee_history(employee_id,effective_month,base_salary,delivery_pay)
+    values ('${STAFF}',$1,9000,0) on conflict do nothing`, [oldMonth]);
+  await pg.exec(`update employees set base_salary=14000 where id='${STAFF}'`);
+  const oldSalary = (await pg.query(`select base_salary from payroll_employee_history where employee_id='${STAFF}' and effective_month=$1`, [oldMonth])).rows[0];
+  check('แก้เดือนใหม่ไม่ย้อนเปลี่ยนเงินเดือนเดือนเก่า', Number(oldSalary?.base_salary) === 9000, JSON.stringify(oldSalary));
+  console.log('✓ ประวัติเงินเดือน — เงินเดือน/โควตา/กติกาเดือนใหม่ไม่ย้อนเปลี่ยนเดือนเก่า');
+}
+
 console.log('');
 if (fails.length) { console.log('✗ ไม่ผ่าน ' + fails.length + ' ข้อ:'); fails.forEach(f => console.log('   • ' + f)); }
 else console.log('✓✓ ผ่านทุกข้อ');

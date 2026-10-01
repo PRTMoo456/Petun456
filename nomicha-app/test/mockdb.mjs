@@ -76,6 +76,7 @@ export function makeDb(TODAY) {
     ],
     external_sales: [{ id: 'es1', sale_date: d(-4), buyer: 'ร้านทดสอบ', issuer: 'u-rel', items: [{ item_id: 2, qty: 2, price: 120, cost:108 }], total: 240, paid: false, edit_log: [] }],
     manual_deliveries: [],
+    payroll_employee_history: [], payroll_branch_history: [], payroll_rules_history: [],
     repairs: [{ id: 'rp1', branch_id: 'lnd', repair_date: d(-2), description: 'ซ่อมเครื่องปั่น', cost: 850 }],
     cash_remittances: [{ id: 'cr1', branch_id: 'lnd', remit_date: d(-4), through_record_date:d(-4), amount: 1200, method: 'cash',created_at:d(-4)+'T10:00:00Z' }],
     head_remittances: [{ id: 'hr1', remit_date: d(-3), amount: 800, method: 'cash' }],

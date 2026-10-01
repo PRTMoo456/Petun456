@@ -27,4 +27,15 @@ export function getSettings() {
   return cache;
 }
 
+// เมื่อต้องคำนวณเดือนย้อนหลัง ใช้กติกาที่มีผลในเดือนนั้นแทนค่าปัจจุบัน
+export function payrollSettingsAt(current, history) {
+  if (!history) return current;
+  return {
+    ...current,
+    diligenceRules: history.diligence_rules ?? current.diligenceRules,
+    holidayPayScale: history.holiday_pay_scale ?? current.holidayPayScale,
+    payRules: { ...current.payRules, ...(history.pay_rules || {}) },
+  };
+}
+
 export function invalidateSettings() { cache = null; }
