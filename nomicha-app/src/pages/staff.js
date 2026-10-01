@@ -334,10 +334,16 @@ function meTab(ctx) {
   return `<div class="stack" id="meBox"><div class="boot">กำลังคำนวณเงินเดือน…</div></div>`;
 }
 
+// เดือนที่ดูในแท็บของฉัน: 'this' = เดือนนี้ · 'prev' = เดือนก่อน (เจ้าของสั่ง 1 ต.ค. 69 — ต้นเดือนพนักงานดูเงินเดือนที่จะได้วันที่ 5)
+let meMonth = 'this';
 async function loadMeTab(ctx) {
   const box = $('#meBox'); if (!box) return;
   const cfg = getSettings();
-  const dates = monthDates(TODAY);
+  const isPrev = meMonth === 'prev';
+  const firstOfSel = isPrev
+    ? (() => { const d = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 2, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01'; })()
+    : TODAY;
+  const dates = monthDates(firstOfSel);
   const monthStart = dates[0];
   const [{ data: records }, { data: clocks }, { data: reliefName }] = await Promise.all([
     supabase.from('daily_records').select('*').eq('branch_id', BRANCH.id).gte('record_date', monthStart).lte('record_date', dates[dates.length - 1]),
@@ -349,7 +355,7 @@ async function loadMeTab(ctx) {
     branch: { relief_name: reliefName || '', base_salary: N(ME.base_salary), days_off_quota: BRANCH.days_off_quota, holiday_work_days: BRANCH.holiday_work_days || 0 },
     records: records || [], clocksByDate, allDatesInMonth: dates, todayISO: TODAY, cfg,
   });
-  const rows = (clocks || []).filter(c => c.staff_name !== reliefName).slice().sort((a, b) => b.clock_date < a.clock_date ? -1 : 1).slice(0, 15).map(c => {
+  const rows = (clocks || []).filter(c => c.staff_name !== reliefName).slice().sort((a, b) => b.clock_date < a.clock_date ? -1 : 1).slice(0, isPrev ? 31 : 15).map(c => {
     const r = (records || []).find(x => x.record_date === c.clock_date);
     const cc = r ? calc.calcDay(r, c, cfg) : null;
     return `<tr><td>${fmtDate(c.clock_date)}</td><td class="n">${c.time_in || '–'}</td><td class="n">${c.time_out || '–'}</td>
@@ -360,11 +366,15 @@ async function loadMeTab(ctx) {
   }).join('');
 
   box.innerHTML = `
+    <span class="seg2" style="align-self:flex-start">
+      <button data-memonth="prev" aria-pressed="${isPrev}">เดือนก่อน</button>
+      <button data-memonth="this" aria-pressed="${!isPrev}">เดือนนี้</button>
+    </span>
     <div class="card pad">
-      <div class="between" style="margin-bottom:2px"><div class="eyebrow">สรุปเงินเดือน (ประมาณการเดือนนี้)</div>
+      <div class="between" style="margin-bottom:2px"><div class="eyebrow">${isPrev ? `สรุปเงินเดือน ${monthLabel(dates[0])}` : 'สรุปเงินเดือน (ประมาณการเดือนนี้)'}</div>
         <button class="mini" id="printSlipBtn">ปริ้นสลิป</button></div>
       <div class="bigtime" style="margin:6px 0 2px">${baht(pr.total)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
-      <div class="sub" style="margin-bottom:10px">ยอดสุทธิโดยประมาณ · จ่ายจริงทุกวันที่ 5</div>
+      <div class="sub" style="margin-bottom:10px">${isPrev ? 'ยอดสุทธิของเดือนนี้ · จ่ายวันที่ 5 (ถ้าเจ้าของแก้ยอดย้อนหลัง ตัวเลขอาจเปลี่ยน)' : 'ยอดสุทธิโดยประมาณ · จ่ายจริงทุกวันที่ 5'}</div>
       <div class="payrows">
         <div class="payrow"><span>เงินเดือนฐาน</span><span class="n">${baht(N(ME.base_salary))}</span></div>
         <div class="payrow"><span>เบี้ยขยัน${pr.reset ? ' <span class="sub" style="color:var(--bad)">— โดนรีเซ็ตเดือนนี้</span>' : ''}</span><span class="n">${baht(pr.diligence)}</span></div>
@@ -377,8 +387,12 @@ async function loadMeTab(ctx) {
     </div>
 
     <div class="tablewrap"><table><thead><tr><th>วันที่</th><th>เข้า</th><th>ออก</th><th>แก้ว</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>
+      <tbody>${rows || '<tr><td colspan="5" class="sub">ยังไม่มีการลงเวลาในเดือนนี้</td></tr>'}</tbody></table></div>
   `;
+  box.querySelectorAll('[data-memonth]').forEach(btn => btn.addEventListener('click', () => {
+    if (meMonth === btn.dataset.memonth) return;
+    meMonth = btn.dataset.memonth; box.innerHTML = '<div class="boot">กำลังคำนวณเงินเดือน…</div>'; loadMeTab(ctx);
+  }));
   const pb = $('#printSlipBtn'); if (pb) pb.addEventListener('click', async () => {
     const [companies, { data: mine }] = await Promise.all([
       getCompanies(),

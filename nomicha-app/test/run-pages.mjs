@@ -332,6 +332,19 @@ if (ownerHTML.pay && ownerHTML.pl) {
     `หน้า "ของฉัน" โชว์เงินเดือนฐาน ${m ? m[1] : '(อ่านไม่ได้)'} ควรเป็น 9,000 ตามที่ตั้งไว้ในตาราง employees`);
   check('มีเงินเดือนสุทธิ', /ยอดสุทธิโดยประมาณ/.test(html), 'ไม่มีสรุปเงินเดือนสุทธิ');
   console.log('✓ หน้า "ของฉัน" — เงินเดือนฐานตรงกับตาราง employees และมีสรุปยอดสุทธิ');
+  const prevBtn = document.querySelector('[data-memonth="prev"]');
+  check('หน้าของฉันมีปุ่มเดือนก่อน', !!prevBtn, 'ไม่พบปุ่ม');
+  if (prevBtn) {
+    prevBtn.click(); await new Promise(r => setTimeout(r, 160));
+    const util = await import('../src/util.js');
+    const d = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 2, 1);
+    const lbl = util.monthLabel(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01');
+    const h2 = document.getElementById('meBox').innerHTML;
+    check('กดเดือนก่อนแล้วขึ้นเงินเดือนเดือนก่อน', h2.includes(`สรุปเงินเดือน ${lbl}`) && /เงินเดือนฐาน<\/span><span class="n">9,000/.test(h2), 'หัวข้อ/ยอดไม่เปลี่ยน');
+    document.querySelector('[data-memonth="this"]').click(); await new Promise(r => setTimeout(r, 160));
+    check('กดกลับเดือนนี้ได้', /ยอดสุทธิโดยประมาณ/.test(document.getElementById('meBox').innerHTML), 'กลับเดือนนี้ไม่ได้');
+  }
+  console.log('✓ หน้า "ของฉัน" — สลับดูเงินเดือนเดือนก่อน/เดือนนี้ได้');
 }
 
 // 4.12 หัวหน้าไปแทนสาขา — ต้องนับแก้วก่อนขายให้เสร็จก่อน ถึงจะเปิดฟอร์มปิดยอดได้
