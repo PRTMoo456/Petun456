@@ -22,7 +22,8 @@ const SUPABASE_SHIM = `
 // ลำดับเดียวกับที่ติดตั้งจริง (docs/DEPLOY.md) — ข้าม 001–005 (รวมอยู่ใน schema.sql แล้ว),
 // 007 (นำเข้ายอดจริงของ 5 สาขา) และ 010 (ซ่อมข้อมูลบัณฑิต 26/09 ตาม id จริง) เพราะผูกกับข้อมูลจริงเฉพาะ
 export const MIGRATIONS = ['006_simplify_harden_and_snapshot.sql', '008_day_off_booking_window.sql',
-  '009_reconcile_unstaffed_leave_days.sql', '011_edit_warehouse_purchase.sql', '012_day_off_booking_window_4_days.sql'];
+  '009_reconcile_unstaffed_leave_days.sql', '011_edit_warehouse_purchase.sql', '012_day_off_booking_window_4_days.sql',
+  '013_purchase_loose_qty.sql'];
 
 export async function makePg() {
   const pg = new PGlite();

@@ -8,7 +8,7 @@ import { quotaReport, dayChip, OFF_LEGEND, quotaHTML, futureDates, LEAVE_MIN_DAY
 import { getCompanies, reliefSlipHTML, externalBillHTML, printDoc } from '../print.js';
 import { defaultDraft, closeFormHTML, validateClose, submitClose, CLOSE_REASON_OPTIONS, closeStore } from '../close.js';
 import { verifyForClock } from '../geo.js';
-import { whAvailMap, issueExternalSale } from '../warehouse.js';
+import { whAvailMap, issueExternalSale, recordPurchase, purchaseQtyLabel, purchaseUnits, qtyField } from '../warehouse.js';
 import * as calc from '../calc.js';
 
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
@@ -313,12 +313,18 @@ async function saveWhStock(stockById) {
 
 // itemId เริ่มเป็น null — ตอนไฟล์นี้โหลด STOCK_ITEMS ยังว่างอยู่ (โหลดจากฐานข้อมูลทีหลัง)
 // จึงใช้ purchItem() หาของจริงทุกครั้ง: ถ้ายังไม่ได้เลือก = รายการแรกที่ขึ้นอยู่บนจอ
-let purchState = { open: false, itemId: null, qty: '', price: '' };
+let purchState = { open: false, itemId: null, qty: '', loose: '', price: '' };
 const purchItem = () => STOCK_ITEMS.find(x => x.id === purchState.itemId) || STOCK_ITEMS[0];
+// ข้อความสรุปใต้ช่องกรอก: ต้นทุนต่อหน่วย + จำนวนชิ้นรวม
+function purchPreviewText() {
+  const it = purchItem(); if (!it) return '';
+  const c = qtyField(purchState.qty), l = qtyField(purchState.loose), p = N(numIn(purchState.price));
+  const u = purchaseUnits(it, c, l);
+  if (!(u > 0) || !(p > 0)) return '';
+  return `รวม ${u} ${it.unit} (${purchaseQtyLabel(c, l, it.unit)}) · ต้นทุน ${(p / u).toFixed(2)} บาท/${it.unit}`;
+}
 function renderPurchCard() {
   const it = purchItem();
-  const q = N(purchState.qty), p = N(purchState.price);
-  const preview = (it && q > 0 && p > 0) ? `เท่ากับ ${(p / (q * it.per_case)).toFixed(2)} บาท/${it.unit} (รวม ${q * it.per_case} ${it.unit})` : '';
   return `<div class="between" style="margin-bottom:4px">
       <div class="eyebrow">บันทึกบิลซื้อวัตถุดิบเข้าคลังกลาง</div>
       <button class="mini" id="purchToggleBtn">${purchState.open ? 'ปิด' : '+ บันทึกบิลซื้อ'}</button>
@@ -326,36 +332,37 @@ function renderPurchCard() {
     ${purchState.open ? `
     <div class="field"><label>รายการ</label>
       <select id="purchItemSel" class="ctl">${STOCK_ITEMS.map(x => `<option value="${x.id}" ${x.id === it?.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
-    <div class="field"><label>จำนวนที่ซื้อ (ลัง)</label><input id="purchQty" inputmode="numeric" value="${purchState.qty}"></div>
-    <div class="field"><label>ราคารวมที่จ่าย (บาท)</label><input id="purchPrice" inputmode="numeric" value="${purchState.price}"></div>
-    <p class="sub" id="purchPreview" style="color:var(--brand)">${preview}</p>
+    <div class="row" style="gap:10px">
+      <div class="field" style="flex:1"><label>จำนวน (ลัง)</label><input id="purchQty" inputmode="numeric" value="${esc(purchState.qty)}" placeholder="0"></div>
+      <div class="field" style="flex:1"><label id="purchLooseLbl">ชิ้นนอกลัง (${esc(it?.unit || 'ชิ้น')})</label><input id="purchLoose" inputmode="numeric" value="${esc(purchState.loose)}" placeholder="0"></div>
+    </div>
+    <p class="sub" id="purchPerCase" style="margin:-4px 0 8px">1 ลัง = ${it?.per_case ?? '-'} ${esc(it?.unit || '')} · กรอกลังอย่างเดียว ชิ้นอย่างเดียว หรือทั้งสองช่องก็ได้</p>
+    <div class="field"><label>ราคารวมที่จ่าย (บาท)</label><input id="purchPrice" inputmode="numeric" value="${esc(purchState.price)}"></div>
+    <p class="sub" id="purchPreview" style="color:var(--brand)">${purchPreviewText()}</p>
     <button class="btn primary big" id="purchSubmitBtn">บันทึกบิลซื้อ</button>` : ''}`;
 }
 function wirePurchCard() {
   const t = $('#purchToggleBtn'); if (t) t.addEventListener('click', () => { purchState.open = !purchState.open; $('#purchCard').innerHTML = renderPurchCard(); wirePurchCard(); });
-  const sel = $('#purchItemSel'); if (sel) sel.addEventListener('change', () => { purchState.itemId = +sel.value; $('#purchPreview').textContent = ''; refreshPurchPreview(); });
-  const q = $('#purchQty'); if (q) q.addEventListener('input', () => { purchState.qty = numIn(q.value); refreshPurchPreview(); });
-  const p = $('#purchPrice'); if (p) p.addEventListener('input', () => { purchState.price = numIn(p.value); refreshPurchPreview(); });
+  const sel = $('#purchItemSel'); if (sel) sel.addEventListener('change', () => {
+    purchState.itemId = +sel.value; const it = purchItem();
+    $('#purchLooseLbl').textContent = `ชิ้นนอกลัง (${it.unit})`;
+    $('#purchPerCase').textContent = `1 ลัง = ${it.per_case} ${it.unit} · กรอกลังอย่างเดียว ชิ้นอย่างเดียว หรือทั้งสองช่องก็ได้`;
+    refreshPurchPreview();
+  });
+  const q = $('#purchQty'); if (q) q.addEventListener('input', () => { purchState.qty = q.value; refreshPurchPreview(); });
+  const l = $('#purchLoose'); if (l) l.addEventListener('input', () => { purchState.loose = l.value; refreshPurchPreview(); });
+  const p = $('#purchPrice'); if (p) p.addEventListener('input', () => { purchState.price = p.value; refreshPurchPreview(); });
   const sub = $('#purchSubmitBtn'); if (sub) sub.addEventListener('click', doSubmitPurchase);
 }
-function refreshPurchPreview() {
-  const it = purchItem();
-  const q = N(purchState.qty), p = N(purchState.price);
-  const el = $('#purchPreview'); if (!el) return;
-  el.textContent = (it && q > 0 && p > 0) ? `เท่ากับ ${(p / (q * it.per_case)).toFixed(2)} บาท/${it.unit} (รวม ${q * it.per_case} ${it.unit})` : '';
-}
+function refreshPurchPreview() { const el = $('#purchPreview'); if (el) el.textContent = purchPreviewText(); }
 async function doSubmitPurchase() {
   const it = purchItem();
-  const q = N(purchState.qty), p = N(purchState.price);
-  if (!it || q <= 0 || !Number.isInteger(q)) { toast('จำนวนที่ซื้อต้องเป็นลังเต็มจำนวนตั้งแต่ 1 ขึ้นไป'); return; }
-  if (p <= 0) { toast('กรอกราคารวมที่จ่ายให้ถูกต้อง'); return; }
+  const caseQty = qtyField(purchState.qty), looseQty = qtyField(purchState.loose), totalPrice = N(numIn(purchState.price));
   const sub = $('#purchSubmitBtn'); if (sub) { sub.disabled = true; sub.textContent = 'กำลังบันทึก…'; }
-  const { data, error } = await supabase.rpc('record_warehouse_purchase', {
-    p_item_id: it.id, p_case_qty: q, p_total_price: p, p_note: `บิลซื้อ${it.name} ${q} ลัง`,
-  });
-  if (error) { toast('บันทึกบิลไม่สำเร็จ: ' + error.message); if (sub) { sub.disabled = false; sub.textContent = 'บันทึกบิลซื้อ'; } return; }
-  toast(`บันทึกบิล ${it.name} ${q} ลัง ${baht(p)} บาทแล้ว — ต้นทุนเฉลี่ยใหม่ ${Number(data?.avg_cost ?? 0).toFixed(2)} บาท/${it.unit}`);
-  purchState = { open: false, itemId: null, qty: '', price: '' };
+  const res = await recordPurchase({ item: it, caseQty, looseQty, totalPrice });
+  if (res.error) { toast(res.error); if (sub) { sub.disabled = false; sub.textContent = 'บันทึกบิลซื้อ'; } return; }
+  toast(`บันทึกบิล ${it.name} ${purchaseQtyLabel(caseQty, looseQty, it.unit)} ${baht(totalPrice)} บาทแล้ว — ต้นทุนเฉลี่ยใหม่ ${Number(res.avg_cost ?? 0).toFixed(2)} บาท/${it.unit}`);
+  purchState = { open: false, itemId: null, qty: '', loose: '', price: '' };
   await draw($('#roleRoot'));
 }
 

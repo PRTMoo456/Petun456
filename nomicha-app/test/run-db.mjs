@@ -79,6 +79,41 @@ const getRec = async (n) => (await pg.query(`select * from daily_records where b
   console.log('✓ จองวันหยุด 4–28 วัน — บังคับที่ฐานข้อมูลทั้งพนักงานและหัวหน้า');
 }
 
+// ---------- 3. บิลซื้อเข้าคลังเป็น ลัง + ชิ้น (1 ต.ค. 69) ----------
+{
+  const it = (await pg.query(`select * from stock_items where id = 41`)).rows[0]; // โซดาร๊อค 1 ลัง = 24 ขวด
+  const units = async () => { const w = (await pg.query(`select * from warehouse_stock where item_id = 41`)).rows[0]; return w ? w.case_qty * it.per_case + w.loose_qty : 0; };
+  const u0 = await units();
+  const r1 = (await asUser(pg, OWNER, `select record_warehouse_purchase(41, 1, 300, null, 30) as r`)).rows[0].r;
+  const w1 = (await pg.query(`select * from warehouse_stock where item_id = 41`)).rows[0];
+  check('ลัง+ชิ้นเพิ่มสต๊อกครบ', (await units()) === u0 + 54, `ได้ ${await units()} คาด ${u0 + 54}`);
+  check('ชิ้นที่ครบลังรวมเป็นลังเต็ม', w1.loose_qty < it.per_case, `ชิ้นเศษ ${w1.loose_qty}`);
+  check('คืนจำนวนที่เพิ่ม', Number(r1.added_units) === 54, JSON.stringify(r1));
+  const p1 = (await pg.query(`select * from purchases where id = $1`, [r1.purchase_id])).rows[0];
+  check('บิลเก็บลัง/ชิ้นแยก', p1.case_qty === 1 && p1.loose_qty === 30, `ลัง ${p1.case_qty} ชิ้น ${p1.loose_qty}`);
+  check('ต้นทุนต่อหน่วย = ราคารวม ÷ ชิ้นรวม', Math.abs(Number(p1.cost_per_unit) - 300 / 54) < 0.001, p1.cost_per_unit);
+  check('หมายเหตุอัตโนมัติ', p1.note === 'บิลซื้อโซดาร๊อค 1 ลัง 30 ขวด', p1.note);
+
+  // ชิ้นอย่างเดียว
+  const r2 = (await asUser(pg, OWNER, `select record_warehouse_purchase(41, 0, 50, null, 10) as r`)).rows[0].r;
+  check('นำเข้าชิ้นอย่างเดียวได้', (await units()) === u0 + 64, `ได้ ${await units()}`);
+  // แบบเดิม (ไม่ส่งช่องชิ้น) ยังใช้ได้
+  await asUser(pg, OWNER, `select record_warehouse_purchase(41, 2, 200, 'บิลเก่า') as r`);
+  check('เรียกแบบเดิม (ลังอย่างเดียว) ยังใช้ได้', (await units()) === u0 + 112, `ได้ ${await units()}`);
+  let err = null;
+  try { await asUser(pg, OWNER, `select record_warehouse_purchase(41, 0, 50, null, 0)`); } catch (e) { err = e.message; }
+  check('กัน 0 ลัง 0 ชิ้น', err && /อย่างน้อย 1/.test(err), err || 'บันทึกได้');
+
+  // เจ้าของแก้บิล: 1 ลัง 30 ขวด → 0 ลัง 6 ขวด
+  const before = await units();
+  const e1 = (await asUser(pg, OWNER, `select edit_warehouse_purchase($1, business_today(), 0, 60, 6) as r`, [r1.purchase_id])).rows[0].r;
+  const p1b = (await pg.query(`select * from purchases where id = $1`, [r1.purchase_id])).rows[0];
+  check('แก้บิลปรับสต๊อกตามส่วนต่าง', (await units()) === before - 48 && Number(e1.stock_units) === before - 48, `ได้ ${await units()} คาด ${before - 48}`);
+  check('แก้บิลแล้วหมายเหตุตามจำนวนใหม่', p1b.note === 'บิลซื้อโซดาร๊อค 6 ขวด' && p1b.loose_qty === 6 && p1b.case_qty === 0, `${p1b.note} / ${p1b.case_qty} / ${p1b.loose_qty}`);
+  check('ต้นทุนบิลแก้แล้ว = 60 ÷ 6', Number(p1b.cost_per_unit) === 10, p1b.cost_per_unit);
+  console.log('✓ บิลซื้อเป็นลัง+ชิ้น — เพิ่ม/แก้สต๊อกและต้นทุนถูกต้อง · แบบเดิมยังใช้ได้');
+}
+
 console.log('');
 if (fails.length) { console.log('✗ ไม่ผ่าน ' + fails.length + ' ข้อ:'); fails.forEach(f => console.log('   • ' + f)); }
 else console.log('✓✓ ผ่านทุกข้อ');

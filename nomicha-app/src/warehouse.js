@@ -65,31 +65,53 @@ export async function editExternalSale({ sale, draftQty, stockItems, avail, byNa
   return { changes: changes.length, cancelled: items.length === 0, total: N(data?.total) };
 }
 
+/* จำนวนในบิลซื้อ: ลัง + ชิ้น → ข้อความ เช่น "2 ลัง" · "5 ขวด" · "2 ลัง 5 ขวด" */
+export function purchaseQtyLabel(caseQty, looseQty, unit) {
+  const parts = [];
+  if (caseQty > 0) parts.push(`${caseQty} ลัง`);
+  if (looseQty > 0) parts.push(`${looseQty} ${unit || 'ชิ้น'}`);
+  return parts.join(' ') || '0';
+}
+/* อ่านช่องจำนวนลัง/ชิ้น: เว้นว่าง = 0 · พิมพ์อะไรที่ไม่ใช่ตัวเลข = NaN (ไม่ให้กลายเป็น 0 เงียบ ๆ แล้วบันทึกผิด) */
+export const qtyField = raw => { const t = String(raw ?? '').replace(/[,\s]/g, ''); return t === '' ? 0 : (/^\d+(\.\d*)?$/.test(t) ? +t : NaN); };
+/* จำนวนชิ้นรวมของบิล (ลัง × จำนวนต่อลัง + ชิ้น) */
+export const purchaseUnits = (item, caseQty, looseQty) => (caseQty || 0) * (item?.per_case || 0) + (looseQty || 0);
+
+function checkQty(caseQty, looseQty) {
+  if (Number.isNaN(caseQty) || Number.isNaN(looseQty)) return 'ช่องจำนวนลัง/ชิ้นพิมพ์ไม่ถูกต้อง กรอกเป็นตัวเลขเท่านั้น';
+  if (!Number.isInteger(caseQty) || caseQty < 0 || !Number.isInteger(looseQty) || looseQty < 0)
+    return 'จำนวนลังและชิ้นต้องเป็นจำนวนเต็ม 0 ขึ้นไป';
+  if (caseQty + looseQty <= 0) return 'กรอกจำนวนลังหรือชิ้นอย่างน้อย 1';
+  return null;
+}
+
 /* แก้บิลซื้อย้อนหลัง (เฉพาะเจ้าของ) ใน transaction เดียวกับการปรับสต๊อก */
-export async function editPurchase({ purchaseId, purchaseDate, caseQty, totalPrice }) {
+export async function editPurchase({ purchaseId, purchaseDate, caseQty, looseQty = 0, totalPrice }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate || '')) return { error: 'กรอกวันที่นำเข้าให้ถูกต้อง' };
-  if (!Number.isInteger(caseQty) || caseQty <= 0) return { error: 'จำนวนลังต้องเป็นจำนวนเต็มมากกว่า 0' };
+  const qErr = checkQty(caseQty, looseQty); if (qErr) return { error: qErr };
   if (!Number.isFinite(totalPrice) || totalPrice <= 0) return { error: 'กรอกราคารวมให้ถูกต้อง' };
   const { data, error } = await supabase.rpc('edit_warehouse_purchase', {
     p_purchase_id: purchaseId,
     p_purchase_date: purchaseDate,
     p_case_qty: caseQty,
+    p_loose_qty: looseQty,
     p_total_price: totalPrice,
   });
   if (error) return { error: 'บันทึกไม่สำเร็จ: ' + error.message };
   return data || {};
 }
 
-/* บันทึกบิลซื้อเข้าคลัง — เพิ่มสต๊อกและคำนวณต้นทุนเฉลี่ยใน transaction เดียว */
-export async function recordPurchase({ item, caseQty, totalPrice }) {
+/* บันทึกบิลซื้อเข้าคลัง — รับเป็นลัง ชิ้น หรือทั้งสองอย่าง · เพิ่มสต๊อกและคำนวณต้นทุนเฉลี่ยใน transaction เดียว */
+export async function recordPurchase({ item, caseQty, looseQty = 0, totalPrice }) {
   if (!item) return { error: 'เลือกรายการสินค้าก่อน' };
-  if (!Number.isInteger(caseQty) || caseQty <= 0) return { error: 'จำนวนที่ซื้อต้องเป็นลังเต็มจำนวนตั้งแต่ 1 ขึ้นไป' };
+  const qErr = checkQty(caseQty, looseQty); if (qErr) return { error: qErr };
   if (!Number.isFinite(totalPrice) || totalPrice <= 0) return { error: 'กรอกราคารวมที่จ่ายให้ถูกต้อง' };
   const { data, error } = await supabase.rpc('record_warehouse_purchase', {
     p_item_id: item.id,
     p_case_qty: caseQty,
+    p_loose_qty: looseQty,
     p_total_price: totalPrice,
-    p_note: `บิลซื้อ${item.name} ${caseQty} ลัง`,
+    p_note: `บิลซื้อ${item.name} ${purchaseQtyLabel(caseQty, looseQty, item.unit)}`,
   });
   if (error) return { error: 'บันทึกบิลไม่สำเร็จ: ' + error.message };
   return data || {};

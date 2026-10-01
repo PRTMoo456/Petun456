@@ -661,6 +661,20 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('เพิ่มสต๊อกตามจำนวนในบิล', addStock.case_qty * addItem.per_case + addStock.loose_qty === addBeforeUnits + 2 * addItem.per_case, 'สต๊อกไม่เพิ่มตามบิล');
   check('สร้างประวัติบิลใหม่', db.purchases.length === addBeforePurchases + 1, 'ไม่พบประวัติบิลใหม่');
   check('กันจำนวนลังไม่ถูกต้อง', !!(await wh.recordPurchase({ item: addItem, caseQty: 0, totalPrice: 100 })).error, 'ยอมให้บันทึก 0 ลัง');
+  // นำเข้าเป็นชิ้น (1 ต.ค. 69): ลัง + ชิ้น / ชิ้นอย่างเดียว · ราคายังเป็นราคารวมทั้งบิล
+  {
+    const u0 = addStock.case_qty * addItem.per_case + addStock.loose_qty;
+    const mixed = await wh.recordPurchase({ item: addItem, caseQty: 1, looseQty: 5, totalPrice: 500 });
+    const lastP = db.purchases[db.purchases.length - 1];
+    check('นำเข้าแบบลัง+ชิ้นได้', !mixed.error && addStock.case_qty * addItem.per_case + addStock.loose_qty === u0 + addItem.per_case + 5, mixed.error || 'สต๊อกไม่เพิ่มตามลัง+ชิ้น');
+    check('ต้นทุนต่อหน่วยหารด้วยชิ้นรวม', Math.abs(lastP.cost_per_unit - 500 / (addItem.per_case + 5)) < 0.01, `ได้ ${lastP.cost_per_unit}`);
+    check('หมายเหตุบิลบอกลัง+ชิ้น', lastP.note === `บิลซื้อ${addItem.name} 1 ลัง 5 ${addItem.unit}`, `ได้ ${lastP.note}`);
+    const onlyLoose = await wh.recordPurchase({ item: addItem, caseQty: 0, looseQty: 3, totalPrice: 90 });
+    check('นำเข้าชิ้นอย่างเดียวได้', !onlyLoose.error, onlyLoose.error || '');
+    check('กันลัง 0 ชิ้น 0', !!(await wh.recordPurchase({ item: addItem, caseQty: 0, looseQty: 0, totalPrice: 90 })).error, 'ยอมให้บันทึก 0');
+    check('กันช่องชิ้นพิมพ์ผิด', !!(await wh.recordPurchase({ item: addItem, caseQty: 1, looseQty: wh.qtyField('5o'), totalPrice: 90 })).error, 'ยอมให้บันทึกทั้งที่พิมพ์ผิด');
+    check('กันชิ้นเป็นเศษทศนิยม', !!(await wh.recordPurchase({ item: addItem, caseQty: 0, looseQty: 1.5, totalPrice: 90 })).error, 'ยอมให้บันทึก 1.5 ชิ้น');
+  }
   const purchase = db.purchases.find(p => p.id === 'p1');
   db.purchases.push({ ...purchase, id: 'p-other', note: 'บิลอื่น' });
   const otherBefore = JSON.stringify(db.purchases.find(p => p.id === 'p-other'));
@@ -726,6 +740,21 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('หัวหน้าบันทึกบิลซื้อได้โดยไม่ต้องเปลี่ยนรายการ', db.purchases.length === before + 1 && added.item_id === firstItem.id,
     db.purchases.length === before ? 'ไม่มีบิลเกิดขึ้น (รายการแรกที่ขึ้นอยู่บนจอไม่ถูกเลือกจริง หรือราคาถูกอ่านเป็น 0)' : `บันทึกเป็นรายการ ${added.item_id}`);
   check('หัวหน้าพิมพ์ราคามีคอมม่าได้', added && Number(added.total_price) === 2400, `ราคาที่บันทึก ${added && added.total_price}`);
+  // หัวหน้ากรอกชิ้นอย่างเดียว (เว้นช่องลังว่าง)
+  document.getElementById('purchToggleBtn').click();
+  await new Promise(r => setTimeout(r, 40));
+  const n2 = db.purchases.length;
+  const loose = document.getElementById('purchLoose'), price2 = document.getElementById('purchPrice');
+  check('หน้าหัวหน้ามีช่องชิ้นนอกลัง', !!loose, 'ไม่พบช่อง purchLoose');
+  if (loose) {
+    loose.value = '7'; loose.dispatchEvent(new dom.window.Event('input'));
+    price2.value = '350'; price2.dispatchEvent(new dom.window.Event('input'));
+    check('ขึ้นสรุปต้นทุนต่อหน่วยจากชิ้น', /50\.00 บาท/.test(document.getElementById('purchPreview').textContent), document.getElementById('purchPreview').textContent);
+    document.getElementById('purchSubmitBtn').click();
+    await new Promise(r => setTimeout(r, 120));
+    const a2 = db.purchases[db.purchases.length - 1];
+    check('หัวหน้านำเข้าชิ้นอย่างเดียวได้', db.purchases.length === n2 + 1 && a2.case_qty === 0 && a2.loose_qty === 7, a2 ? `ลัง ${a2.case_qty} ชิ้น ${a2.loose_qty}` : 'ไม่มีบิล');
+  }
   console.log('✓ หัวหน้าบันทึกบิลซื้อ — รายการแรกเลือกได้ทันที และพิมพ์ราคามีคอมม่าได้');
 
   // นับสต๊อกคลังกลาง พิมพ์ผิด (ตัว o แทนเลข 0) ต้องเตือน ไม่ใช่บันทึกทับเป็น 0 ลัง

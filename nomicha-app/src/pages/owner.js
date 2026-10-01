@@ -5,7 +5,7 @@ import { getSettings, loadSettings, invalidateSettings } from '../settings.js';
 import { $, N, numIn, numSet, baht, signed, esc, toast, todayISO, isoDate, fmtDate, monthKey, monthLabel, monthDates, DAYS } from '../util.js';
 import { loadRefs, invalidateRefs } from '../refs.js';
 import { futureDates } from '../dayoff.js';
-import { whAvailMap, issueExternalSale, editExternalSale, editPurchase, recordPurchase } from '../warehouse.js';
+import { whAvailMap, issueExternalSale, editExternalSale, editPurchase, recordPurchase, purchaseQtyLabel, purchaseUnits, qtyField } from '../warehouse.js';
 import { loadPeople, peopleCardHTML, bindPeopleCard } from './people.js';
 import { getCompanies, deliveryReportHTML, deliveryMonthHTML, externalBillHTML, externalMonthHTML, staffSlipHTML, reliefSlipHTML, printDoc } from '../print.js';
 import { CLOSE_REASON_OPTIONS, closeStore, closeFormHTML, defaultDraft, draftFromRecord, validateClose, submitClose, updateClose, updateClosure, cancelClosure } from '../close.js';
@@ -14,7 +14,16 @@ import * as calc from '../calc.js';
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
 let monthPayrollCache = null;
 let tabLoadTicket = 0;
-let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, purchaseOpen: false, purchaseShowAll: false, purchaseItemId: null, purchaseQty: '', purchasePrice: '', purchaseEditing: null, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
+let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, purchaseOpen: false, purchaseShowAll: false, purchaseItemId: null, purchaseQty: '', purchaseLoose: '', purchasePrice: '', purchaseEditing: null, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
+// บิลนำเข้า (ลัง + ชิ้น) — สินค้าที่เลือก และข้อความสรุปต้นทุนต่อหน่วยใต้ช่องกรอก
+const ownPurchItem = () => STOCK_ITEMS.find(x => String(x.id) === String(S.purchaseItemId)) || STOCK_ITEMS[0];
+function ownPurchPreviewText() {
+  const it = ownPurchItem(); if (!it) return '';
+  const c = qtyField(S.purchaseQty), l = qtyField(S.purchaseLoose), p = N(S.purchasePrice);
+  const u = purchaseUnits(it, c, l);
+  if (!(u > 0) || !(p > 0)) return '';
+  return `รวม ${u} ${it.unit} (${purchaseQtyLabel(c, l, it.unit)}) · ต้นทุน ${(p / u).toFixed(2)} บาท/${it.unit}`;
+}
  
 export async function renderOwnerApp(root, me) {
   ME = me; TODAY = todayISO();
@@ -907,7 +916,7 @@ async function renderPL(body) {
   const purchRows = (purchases || []).map(p => {
     const it = STOCK_ITEMS.find(x => x.id === p.item_id);
     const editing = S.purchaseEditing === p.id;
-    const head = `<tr><td>${fmtDate(p.purchase_date)}</td><td>${esc(it ? it.name : '—')}</td><td class="n">${p.case_qty} ลัง</td>
+    const head = `<tr><td>${fmtDate(p.purchase_date)}</td><td>${esc(it ? it.name : '—')}</td><td class="n">${esc(purchaseQtyLabel(p.case_qty, p.loose_qty || 0, it ? it.unit : 'ชิ้น'))}</td>
       <td class="n">${baht(p.total_price)}</td><td class="n">${Number(p.cost_per_unit).toFixed(2)}</td><td class="sub">${esc(p.note || '')}</td>
       <td class="n"><button class="mini" data-purchedit="${p.id}">${editing ? 'ปิด' : 'แก้ไข'}</button></td></tr>`;
     if (!editing) return head;
@@ -916,15 +925,13 @@ async function renderPL(body) {
       <div class="row" style="gap:10px;align-items:end;flex-wrap:wrap">
         <div class="field" style="margin:0"><label>วันที่นำเข้า</label><input type="date" value="${p.purchase_date}" data-purchdate="${p.id}"></div>
         <div class="field" style="margin:0"><label>จำนวน (ลัง)</label><input value="${p.case_qty}" inputmode="numeric" data-purchqty="${p.id}" style="width:90px"></div>
+        <div class="field" style="margin:0"><label>ชิ้นนอกลัง (${esc(it ? it.unit : 'ชิ้น')})</label><input value="${p.loose_qty || 0}" inputmode="numeric" data-purchloose="${p.id}" style="width:90px"></div>
         <div class="field" style="margin:0"><label>ราคารวม (บาท)</label><input value="${p.total_price}" inputmode="decimal" data-purchprice="${p.id}" style="width:120px"></div>
         <button class="btn primary" data-purchsave="${p.id}">บันทึกการแก้ไข</button>
       </div></div></td></tr>`;
   }).join('');
   const purchaseItem = STOCK_ITEMS.find(x => String(x.id) === String(S.purchaseItemId)) || STOCK_ITEMS[0];
-  const purchaseQty = N(S.purchaseQty), purchasePrice = N(S.purchasePrice);
-  const purchasePreview = purchaseItem && purchaseQty > 0 && purchasePrice > 0
-    ? `เท่ากับ ${(purchasePrice / (purchaseQty * purchaseItem.per_case)).toFixed(2)} บาท/${esc(purchaseItem.unit)} (รวม ${purchaseQty * purchaseItem.per_case} ${esc(purchaseItem.unit)})`
-    : '';
+  const purchasePreview = esc(ownPurchPreviewText());
   const repairRows = (repairs || []).map(r => {
     const b = BRANCHES.find(x => x.id === r.branch_id);
     return `<tr><td>${fmtDate(r.repair_date)}</td><td>${esc(b ? b.name : '—')}</td><td>${esc(r.description)}</td><td class="n">${baht(r.cost)}</td></tr>`;
@@ -994,11 +1001,13 @@ async function renderPL(body) {
     ${S.purchaseOpen ? `<div class="card pad" style="margin-bottom:10px">
       <div class="field"><label>สินค้า</label><select id="ownPurchItem" class="ctl">${STOCK_ITEMS.map(it => `<option value="${it.id}" ${String(it.id) === String(S.purchaseItemId) ? 'selected' : ''}>${esc(it.name)}</option>`).join('')}</select></div>
       <div class="row" style="gap:10px;align-items:end;flex-wrap:wrap">
-        <div class="field" style="margin:0"><label>จำนวนที่ซื้อ (ลัง)</label><input id="ownPurchQty" inputmode="numeric" value="${esc(S.purchaseQty)}" style="width:110px"></div>
+        <div class="field" style="margin:0"><label>จำนวน (ลัง)</label><input id="ownPurchQty" inputmode="numeric" value="${esc(S.purchaseQty)}" placeholder="0" style="width:90px"></div>
+        <div class="field" style="margin:0"><label id="ownPurchLooseLbl">ชิ้นนอกลัง (${esc(purchaseItem?.unit || 'ชิ้น')})</label><input id="ownPurchLoose" inputmode="numeric" value="${esc(S.purchaseLoose)}" placeholder="0" style="width:110px"></div>
         <div class="field" style="margin:0"><label>ราคารวมที่จ่าย (บาท)</label><input id="ownPurchPrice" inputmode="decimal" value="${esc(S.purchasePrice)}" style="width:150px"></div>
         <button class="btn primary" id="ownPurchSubmit">บันทึกบิลนำเข้า</button>
       </div>
-      <p class="sub" id="ownPurchPreview" style="color:var(--brand);margin:8px 0 0">${purchasePreview}</p>
+      <p class="sub" id="ownPurchPerCase" style="margin:8px 0 0">1 ลัง = ${purchaseItem?.per_case ?? '-'} ${esc(purchaseItem?.unit || '')} · กรอกลังอย่างเดียว ชิ้นอย่างเดียว หรือทั้งสองช่องก็ได้ · ราคาใส่ยอดรวมตามบิล</p>
+      <p class="sub" id="ownPurchPreview" style="color:var(--brand);margin:4px 0 0">${purchasePreview}</p>
     </div>` : ''}
     <div class="tablewrap" style="margin-bottom:16px"><table><thead><tr><th>วันที่</th><th>วัตถุดิบ</th><th>จำนวน</th><th>ราคารวม</th><th>ทุน/หน่วย</th><th>หมายเหตุ</th><th></th></tr></thead>
       <tbody>${purchRows || '<tr><td colspan="7" class="sub">ยังไม่มีบิล</td></tr>'}</tbody></table></div>
@@ -1027,33 +1036,36 @@ async function renderPL(body) {
     S.purchaseEditing = S.purchaseEditing === btn.dataset.purchedit ? null : btn.dataset.purchedit;
     renderPL(body);
   }));
-  const purchasePreviewEl = () => {
-    const it = STOCK_ITEMS.find(x => String(x.id) === String(S.purchaseItemId)) || STOCK_ITEMS[0];
-    const q = N(S.purchaseQty), p = N(S.purchasePrice);
-    const el = $('#ownPurchPreview'); if (!el) return;
-    el.textContent = it && q > 0 && p > 0 ? `เท่ากับ ${(p / (q * it.per_case)).toFixed(2)} บาท/${it.unit} (รวม ${q * it.per_case} ${it.unit})` : '';
-  };
+  const purchasePreviewEl = () => { const el = $('#ownPurchPreview'); if (el) el.textContent = ownPurchPreviewText(); };
   const opt = $('#ownPurchToggle'); if (opt) opt.addEventListener('click', () => { S.purchaseOpen = !S.purchaseOpen; renderPL(body); });
   const opsa = $('#ownPurchShowAll'); if (opsa) opsa.addEventListener('click', () => { S.purchaseShowAll = !S.purchaseShowAll; S.purchaseEditing = null; renderPL(body); });
-  const opi = $('#ownPurchItem'); if (opi) opi.addEventListener('change', () => { S.purchaseItemId = opi.value; purchasePreviewEl(); });
-  const opq = $('#ownPurchQty'); if (opq) opq.addEventListener('input', () => { S.purchaseQty = numIn(opq.value); purchasePreviewEl(); });
+  const opi = $('#ownPurchItem'); if (opi) opi.addEventListener('change', () => {
+    S.purchaseItemId = opi.value; const it = ownPurchItem();
+    $('#ownPurchLooseLbl').textContent = `ชิ้นนอกลัง (${it.unit})`;
+    $('#ownPurchPerCase').textContent = `1 ลัง = ${it.per_case} ${it.unit} · กรอกลังอย่างเดียว ชิ้นอย่างเดียว หรือทั้งสองช่องก็ได้ · ราคาใส่ยอดรวมตามบิล`;
+    purchasePreviewEl();
+  });
+  const opq = $('#ownPurchQty'); if (opq) opq.addEventListener('input', () => { S.purchaseQty = opq.value; purchasePreviewEl(); });
+  const opl = $('#ownPurchLoose'); if (opl) opl.addEventListener('input', () => { S.purchaseLoose = opl.value; purchasePreviewEl(); });
   const opp = $('#ownPurchPrice'); if (opp) opp.addEventListener('input', () => { S.purchasePrice = numIn(opp.value); purchasePreviewEl(); });
   const ops = $('#ownPurchSubmit'); if (ops) ops.addEventListener('click', async () => {
-    const item = STOCK_ITEMS.find(x => String(x.id) === String(S.purchaseItemId));
+    const item = ownPurchItem();
+    const caseQty = qtyField(S.purchaseQty), looseQty = qtyField(S.purchaseLoose);
     ops.disabled = true; ops.textContent = 'กำลังบันทึก…';
-    const res = await recordPurchase({ item, caseQty: Number(S.purchaseQty), totalPrice: Number(S.purchasePrice) });
+    const res = await recordPurchase({ item, caseQty, looseQty, totalPrice: N(S.purchasePrice) });
     if (res.error) { ops.disabled = false; ops.textContent = 'บันทึกบิลนำเข้า'; toast(res.error); return; }
-    toast(`บันทึกบิล ${item.name} ${S.purchaseQty} ลังแล้ว — ต้นทุนเฉลี่ยใหม่ ${Number(res.avg_cost ?? 0).toFixed(2)} บาท/${item.unit}`);
-    S.purchaseOpen = false; S.purchaseQty = ''; S.purchasePrice = '';
+    toast(`บันทึกบิล ${item.name} ${purchaseQtyLabel(caseQty, looseQty, item.unit)} แล้ว — ต้นทุนเฉลี่ยใหม่ ${Number(res.avg_cost ?? 0).toFixed(2)} บาท/${item.unit}`);
+    S.purchaseOpen = false; S.purchaseQty = ''; S.purchaseLoose = ''; S.purchasePrice = '';
     renderPL(body);
   });
   body.querySelectorAll('[data-purchsave]').forEach(btn => btn.addEventListener('click', async () => {
     const id = btn.dataset.purchsave;
-    const caseQty = N(numIn(body.querySelector(`[data-purchqty="${id}"]`).value));
+    const caseQty = qtyField(body.querySelector(`[data-purchqty="${id}"]`).value);
+    const looseQty = qtyField(body.querySelector(`[data-purchloose="${id}"]`)?.value);
     const totalPrice = N(numIn(body.querySelector(`[data-purchprice="${id}"]`).value));
     const purchaseDate = body.querySelector(`[data-purchdate="${id}"]`).value;
     btn.disabled = true;
-    const res = await editPurchase({ purchaseId: id, purchaseDate, caseQty, totalPrice });
+    const res = await editPurchase({ purchaseId: id, purchaseDate, caseQty, looseQty, totalPrice });
     if (res.error) { btn.disabled = false; toast(res.error); return; }
     toast(`แก้บิลนำเข้าแล้ว — สต๊อกคงเหลือ ${res.stock_units} ${res.unit || 'หน่วย'} · ทุนเฉลี่ย ${Number(res.avg_cost).toFixed(2)} บาท`);
     S.purchaseEditing = null;
