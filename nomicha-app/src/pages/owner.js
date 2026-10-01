@@ -57,6 +57,14 @@ function selectOwnerTab(tab) {
   return loadTab();
 }
  
+/* เวลาเข้า-ออกงานแบบสั้น สำหรับการ์ดสาขาหน้าภาพรวม เช่น "🕘 เข้า 08:02 (สาย 2 น.) · ออก 20:01" */
+const hm = t => t ? String(t).slice(0, 5) : '';
+function clockText(c) {
+  if (!c || (!c.time_in && !c.time_out)) return '🕘 ยังไม่ลงเวลาเข้า';
+  const late = N(c.late_minutes), early = N(c.early_minutes);
+  return `🕘 เข้า ${hm(c.time_in) || '–'}${late ? ` (สาย ${late} น.)` : ''} · ออก ${hm(c.time_out) || 'ยังไม่ออก'}${early ? ` (ปิดไว ${early} น.)` : ''}`;
+}
+
 /* เดือนที่เลือกดู (เงินเดือน · กำไร/ขาดทุน · ปริ้นสรุปส่งของทั้งเดือน) — ค่าเริ่มต้นคือเดือนปัจจุบัน
    ดูย้อนหลังได้ 12 เดือน (เจ้าของสั่ง 1 ต.ค. 69 — ต้นเดือนต้องดูยอด/จ่ายเงินเดือนของเดือนที่แล้ว) */
 const selMonth = () => S.month || TODAY.slice(0, 7);
@@ -112,7 +120,7 @@ async function renderToday(body) {
     const r = (records || []).find(x => x.branch_id === b.id);
     const c = (clocks || []).find(x => x.branch_id === b.id);
     const cc = (r && r.sent) ? calc.calcDay(r, c, cfg) : null;
-    return { b, r, cc };
+    return { b, r, cc, c };
   });
   const sent = recs.filter(x => x.cc);
   const totalSales = sent.reduce((s, x) => s + x.cc.income - x.cc.expense, 0);
@@ -138,11 +146,12 @@ async function renderToday(body) {
     cashPendingByBranch[b.id] = calc.cashPending(branchRecs, cutoff).amount;
   });
  
-  const cards = recs.map(({ b, r, cc }) => {
-    if (!cc) return `<div class="bcard pending" data-gob="${b.id}" style="cursor:pointer"><div class="between"><h4>${esc(b.name)}</h4><span class="pill wait">ยังไม่ส่ง</span></div><div class="sub">รอปิดยอด</div></div>`;
+  const cards = recs.map(({ b, r, cc, c }) => {
+    const cl = `<div class="sub" style="margin-top:4px">${clockText(c)}</div>`;
+    if (!cc) return `<div class="bcard pending" data-gob="${b.id}" style="cursor:pointer"><div class="between"><h4>${esc(b.name)}${c?.staff_name ? ' · ' + esc(c.staff_name) : ''}</h4><span class="pill wait">ยังไม่ส่ง</span></div><div class="sub">รอปิดยอด</div>${cl}</div>`;
     if (r.store_closed) {
       const rule = CLOSE_REASON_OPTIONS.find(x => x.value === r.closure_reason);
-      return `<div class="bcard pending" data-gob="${b.id}" style="cursor:pointer"><div class="between"><h4>${esc(b.name)}</h4><span class="pill warn">ปิดร้าน</span></div><div class="sub">${esc(rule ? rule.label : 'ไม่ระบุสาเหตุ')}</div></div>`;
+      return `<div class="bcard pending" data-gob="${b.id}" style="cursor:pointer"><div class="between"><h4>${esc(b.name)}</h4><span class="pill warn">ปิดร้าน</span></div><div class="sub">${esc(rule ? rule.label : 'ไม่ระบุสาเหตุ')}</div>${cl}</div>`;
     }
     const bad = Math.abs(cc.variance) >= 50;
     return `<div class="bcard ${bad ? 'alert' : ''}" data-gob="${b.id}" style="cursor:pointer">
@@ -150,6 +159,7 @@ async function renderToday(body) {
         ${cc.variance === 0 ? '<span class="pill ok">ตรง</span>' : `<span class="pill ${bad ? 'bad' : 'warn'}">${cc.variance < 0 ? 'ขาด' : 'เกิน'} ${baht(Math.abs(cc.variance))}</span>`}</div>
       <div class="money">${baht(cc.income - cc.expense)} <span class="sub" style="font-size:12px">บาท</span></div>
       <div class="meta"><span>ค้างส่ง ${baht(cashPendingByBranch[b.id] || 0)} บาท</span><span>${cc.cups} แก้ว</span></div>
+      ${cl}
     </div>`;
   }).join('');
  
@@ -207,6 +217,12 @@ async function renderDay(body) {
   const sellerOptions=selected=>[selected,...sellerPeople.map(p=>p.name)].filter((name,i,a)=>name&&a.indexOf(name)===i)
     .map(name=>`<option value="${esc(name)}" ${name===selected?'selected':''}>${esc(name)}</option>`).join('');
   const clocksByDate = {}; (clocks || []).forEach(c => { clocksByDate[c.clock_date] = c; });
+  const clockList = days.map(d => clocksByDate[d]).filter(Boolean);
+  const clockLate = clockList.reduce((s, c) => s + N(c.late_minutes), 0), clockEarly = clockList.reduce((s, c) => s + N(c.early_minutes), 0);
+  const clockRows = clockList.map(c => `<tr><td>${fmtDate(c.clock_date)}</td><td>${esc(c.staff_name)}</td>
+    <td class="n">${hm(c.time_in) || '<span class="sub">–</span>'}</td><td class="n">${hm(c.time_out) || '<span class="sub">ไม่ได้ลงออก</span>'}</td>
+    <td class="n ${N(c.late_minutes) ? 'neg' : ''}">${N(c.late_minutes) || '–'}</td><td class="n ${N(c.early_minutes) ? 'neg' : ''}">${N(c.early_minutes) || '–'}</td>
+    <td class="n sub">${c.in_distance_m ?? '–'} / ${c.out_distance_m ?? '–'}</td></tr>`).join('');
   const recByDate = {}; (records || []).forEach(r => { recByDate[r.record_date] = r; });
   // ดึงประวัติแก้ไขแยกทีหลังด้วย record_id ตรง ๆ (ไม่พึ่งการกรองผ่านตารางที่ join มา — ชัวร์กว่าตอน deploy จริง)
   const recordIds = (records || []).map(r => r.id);
@@ -328,6 +344,14 @@ async function renderDay(body) {
         <td class="n">${baht(sum.expectedTotal)}</td><td class="n">${baht(sum.cash)}</td><td class="n">${baht(sum.tf)}</td><td class="n">${baht(sum.grab)}</td><td class="n">${baht(sum.tct)}</td>
         <td class="n">${baht(sumCups)}</td><td class="n ${sumVar < 0 ? 'neg' : sumVar > 0 ? 'pos' : ''}">${signed(sumVar)}</td></tr></tfoot></table></div>
     <p class="foot">กด <b>แก้</b> ท้ายแถวเพื่อแก้ตัวเลขที่พนักงานกรอกผิด — ระบบคิดขาด/เกินใหม่ให้ทันที และจดประวัติไว้</p>
+    <h3 style="margin:22px 0 10px">เวลาเข้า-ออกงาน · สาขา${esc(b.name)}</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>วันที่</th><th>ชื่อ</th><th>เข้า</th><th>ออก</th><th>สาย (นาที)</th><th>ปิดไว (นาที)</th><th>ห่างร้าน (ม.) เข้า/ออก</th></tr></thead>
+      <tbody>${clockRows || `<tr><td colspan="7" class="sub">ช่วงนี้ยังไม่มีการลงเวลา</td></tr>`}</tbody>
+      ${clockRows ? `<tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td colspan="4">รวม ${clockList.length} วัน</td>
+        <td class="n ${clockLate ? 'neg' : ''}">${clockLate || '–'}</td><td class="n ${clockEarly ? 'neg' : ''}">${clockEarly || '–'}</td><td></td></tr></tfoot>` : ''}
+    </table></div>
+    <p class="foot">หัวหน้าที่ไปทำแทนจะขึ้นชื่อหัวหน้าในวันนั้น (หัวหน้าไม่หักสาย/ปิดไว) · ระยะห่างร้านคือ GPS ตอนกดลงเวลา</p>
     <h3 style="margin:22px 0 10px">ประวัติการแก้ไขย้อนหลัง</h3>
     <div class="tablewrap"><table><thead><tr><th>วันที่ยอด</th><th>รายการที่แก้</th><th>เมื่อไร</th></tr></thead>
       <tbody>${(edits || []).slice(0, 30).map(e => `<tr>
