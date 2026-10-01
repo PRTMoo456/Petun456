@@ -125,6 +125,17 @@ const getRec = async (n) => (await pg.query(`select * from daily_records where b
   console.log('✓ ส่งทีละ — โซดา 12 ขวด รายการอื่น 1 · กันค่า 0');
 }
 
+// ---------- 5. ต้นทุนส่งนอกแอป: เจ้าของเท่านั้น ----------
+{
+  await asUser(pg, OWNER, `insert into manual_deliveries(branch_id, delivery_date, amount) values ('bdt', '2026-09-15', 1200)`);
+  const n = (await pg.query(`select count(*)::int n from manual_deliveries`)).rows[0].n;
+  const pol = (await pg.query(`select relrowsecurity r from pg_class where relname = 'manual_deliveries'`)).rows[0];
+  const qual = (await pg.query(`select pg_get_expr(polqual, polrelid) q from pg_policy where polname = 'manual_deliveries_owner'`)).rows[0];
+  check('บันทึกต้นทุนนอกแอปได้', n === 1, `ได้ ${n}`);
+  check('ตารางเปิด RLS และเฉพาะเจ้าของ', pol?.r === true && /owner/.test(qual?.q || ''), JSON.stringify({ pol, qual }));
+  console.log('✓ ต้นทุนส่งนอกแอป — ตารางสร้างได้ เจ้าของบันทึกได้');
+}
+
 console.log('');
 if (fails.length) { console.log('✗ ไม่ผ่าน ' + fails.length + ' ข้อ:'); fails.forEach(f => console.log('   • ' + f)); }
 else console.log('✓✓ ผ่านทุกข้อ');

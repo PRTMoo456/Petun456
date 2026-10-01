@@ -178,8 +178,10 @@ export function pickList(stockItems, parByItemId, lastStockSnapshot) {
 }
 
 // พอร์ตจาก warehousePL() — กำไรคลังกลาง (ส่วนต่างราคาวัตถุดิบของทุกอย่างที่ส่งออกไปในเดือน ลบค่าแรงหัวหน้าเต็มจำนวน)
-export function warehousePL({ deliveries, externalSales, stockItemsById, avgCostById, reliefPayroll }) {
+export function warehousePL({ deliveries, externalSales, stockItemsById, avgCostById, reliefPayroll, manualDeliveries = [], manualCostRate = 0.9 }) {
   let sales = 0, cost = 0;
+  // รอบส่งของนอกแอป (กรอกยอดรวมตามราคาส่งสาขา) — ต้นทุนคลังใช้สูตร ราคาส่งสาขา − 10%
+  manualDeliveries.forEach(m => { sales += N(m.amount); cost += N(m.amount) * manualCostRate; });
   const add = (qty, price, itemId, unitCost) => { sales += qty * price; cost += qty * (unitCost ?? avgCostById[itemId] ?? 0); };
   deliveries.forEach(dlv => Object.entries(dlv.items).forEach(([id, qty]) => {
     const it = stockItemsById[id]; if (!it) return;
