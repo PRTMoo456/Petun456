@@ -66,21 +66,8 @@ export function aggregateBranchSales(records, clocksByDate, cfg) {
   return { sales, grab, grabCommission };
 }
 
-/* นับ "ลืมลงเวลา" ของคนคนหนึ่ง — หัก 40 บาท/ครั้ง (RULES.noClock)
-   ต้องลงเวลาให้ครบทั้งเข้าและออก ลงไม่ครบถือว่าลืม · นับเฉพาะวันที่ผ่านไปแล้ว เพราะวันนี้ยังไม่จบ ยังลงเวลาออกได้อยู่
-   คิดตอนทำเงินเดือน ไม่ได้เก็บเป็นธงตอนกดลงเวลา เพราะตอนนั้นยังไม่รู้ว่าสุดท้ายจะลืมลงเวลาออกหรือเปล่า */
-function countNoClock(clockRows, workedDates, todayISO) {
-  let n = 0;
-  const seen = new Set();
-  clockRows.forEach(c => {
-    seen.add(c.clock_date);
-    if (c.clock_date >= todayISO) return;
-    if (c.no_clock) { n++; return; }
-    if (!c.time_in || !c.time_out) n++;
-  });
-  workedDates.forEach(d => { if (d < todayISO && !seen.has(d)) n++; });
-  return n;
-}
+/* ยกเลิกค่าปรับ "ลืมลงเวลา" แล้ว (เจ้าของสั่ง 1 ต.ค. 69) — ไม่ลงเวลาเข้าก็เริ่มงาน/กรอกแก้วตอนจบงานไม่ได้อยู่แล้ว
+   จึงไม่ต้องมีค่าปรับซ้ำ · มาสาย/ปิดไวยังหักตามเวลาที่ลงไว้เหมือนเดิม */
 
 /* พอร์ตจาก payrollFor() — เงินเดือน "ของสาขา" ในเดือนที่กำหนด (1 สาขา = 1 บัญชี = 1 ก้อนเงินเดือน)
    records/clocks = ทุกแถวของสาขานั้นในเดือนนั้น ฟังก์ชันกรองเอง: นับทุกแถวของสาขา ยกเว้นวันที่หัวหน้ามาทำแทน
@@ -98,13 +85,6 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, tod
   });
   const myClocks = Object.values(clocksByDate).filter(c => c && ofBranch(c.staff_name));
   myClocks.forEach(c => { late += c.late_minutes || 0; early += c.early_minutes || 0; });
-  // รายการย้อนหลังที่นำเข้าผ่าน SQL ไม่มี created_by และไม่มีหลักฐานเวลาเข้า-ออก
-  // ยังนับยอดขาย/ค่าแก้วตามจริง แต่ไม่สร้างค่าปรับ "ลืมลงเวลา" ขึ้นมาเองจากข้อมูลที่ไฟล์ไม่มี
-  // รายการที่พนักงานหรือเจ้าของบันทึกผ่านแอปมี created_by เสมอ จึงใช้กติกาเดิมครบถ้วน
-  const clockRequiredDates = workRecords
-    .filter(r => ofBranch(r.staff_name) && r.created_by != null)
-    .map(r => r.record_date);
-  const noClock = countNoClock(myClocks, clockRequiredDates, todayISO);
 
   const counted = allDatesInMonth.filter(d => {
     const closure = closureByDate.get(d);
@@ -129,14 +109,14 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, tod
   const holidayPay = holidays ? cfg.holidayPayScale.slice(0, holidays).reduce((a, c) => a + c, 0) : 0;
   const R = cfg.payRules;
   const cupPay = cups * R.cupPay;
-  const deduct = late * R.latePerMin + early * R.earlyPerMin + noClock * R.noClock + excess * R.excessDayOff;
+  const deduct = late * R.latePerMin + early * R.earlyPerMin + excess * R.excessDayOff;
   const total = branch.base_salary + diligence + holidayPay + cupPay - deduct;
-  return { cups, late, early, noClock, daysOffTaken, excess, reset, diligence, holidayPay, cupPay, deduct, total };
+  return { cups, late, early, daysOffTaken, excess, reset, diligence, holidayPay, cupPay, deduct, total };
 }
 
 /* พอร์ตจาก payrollForRelief() — เงินเดือนหัวหน้า (ไม่ผูกสาขาเดียว วนดูทุกสาขาที่ไปแทน)
    ต่างจากพนักงานสาขา (เจ้าของสั่งแก้ 5 ก.ย. 69): หัวหน้าไปทำแทนหลายสาขาคนละเวลา บางวันต้องไปส่งของก่อนแล้วค่อยไปเปิดร้าน
-   จึงไม่หัก "มาสาย/ปิดไว" กับหัวหน้า — แต่ยัง "ต้องลงเวลาให้ครบเข้า-ออก" เหมือนกัน ลืมลงเวลายังหัก 40 บาท/ครั้ง */
+   จึงไม่หัก "มาสาย/ปิดไว" กับหัวหน้า (ค่าปรับลืมลงเวลายกเลิกแล้วทั้งระบบ 1 ต.ค. 69) — หัวหน้าจึงไม่มีรายการหัก */
 export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDate, todayISO, cfg, whRent }) {
   let cups = 0;
   allBranchRecords.forEach(r => {
@@ -145,18 +125,10 @@ export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDa
       cups += c ? c.cups : 0;
     }
   });
-  const myClocks = [];
-  Object.values(allBranchClocksByDate).forEach(byDate => Object.values(byDate).forEach(c => {
-    if (c && c.staff_name === relief.name) myClocks.push(c);
-  }));
-  const workedDates = allBranchRecords
-    .filter(r => !r.store_closed && r.staff_name === relief.name && r.created_by != null)
-    .map(r => r.record_date);
-  const noClock = countNoClock(myClocks, workedDates, todayISO);
   const cupPay = cups * cfg.payRules.cupPay;
-  const deduct = noClock * cfg.payRules.noClock;
+  const deduct = 0;
   const total = relief.base_salary + relief.delivery_pay + whRent + cupPay - deduct;
-  return { cups, noClock, deduct, cupPay, whRent, total, diligence: 0, holidayPay: 0, reset: false, late: 0, early: 0 };
+  return { cups, deduct, cupPay, whRent, total, diligence: 0, holidayPay: 0, reset: false, late: 0, early: 0 };
 }
 
 // พอร์ตจาก branchPL() — กำไร/ขาดทุนรายสาขาในเดือนที่กำหนด
@@ -179,12 +151,21 @@ export function monthMaterialCost(deliveries, stockItemsById) {
   }, 0), 0);
 }
 
-// พอร์ตจาก pickList() — รายการที่ต้องจัดส่งให้สาขา (par - have) เฉพาะที่ยังขาด
+/* จำนวนที่ต้องจัดส่ง = ส่วนที่ขาด (par − have) ปัดขึ้นเป็นทวีคูณของ "ส่งทีละ" (ship_pack)
+   เช่น โซดา par 10 ส่งทีละ 12: เหลือ 9 → ส่ง 12 · เหลือ 0 → ส่ง 12 · เหลือ 10 → ไม่ต้องส่ง (เจ้าของสั่ง 1 ต.ค. 69) */
+export function shipNeed(par, have, shipPack) {
+  const short = (par ?? 0) - (have ?? 0);
+  if (!(short > 0)) return 0;
+  const pack = Math.max(1, Math.floor(Number(shipPack) || 1));
+  return Math.ceil(short / pack) * pack;
+}
+
+// พอร์ตจาก pickList() — รายการที่ต้องจัดส่งให้สาขา เฉพาะที่ยังขาด (ปัดตาม "ส่งทีละ")
 export function pickList(stockItems, parByItemId, lastStockSnapshot) {
   return stockItems.map(it => {
     const par = parByItemId[it.id] ?? 0;
     const have = lastStockSnapshot ? (lastStockSnapshot[it.id] ?? 0) : 0;
-    return { it, par, have, need: Math.max(0, par - have) };
+    return { it, par, have, need: shipNeed(par, have, it.ship_pack) };
   }).filter(x => x.need > 0);
 }
 

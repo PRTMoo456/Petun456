@@ -220,9 +220,9 @@ if (ownerHTML.pay && ownerHTML.pl) {
     ],
     clocksByDate: {}, allDatesInMonth: [appDate, importedDate], todayISO: TODAY, cfg,
   });
-  check('ยอดนำเข้าย้อนหลังไม่โดนหักลืมลงเวลา', pr.noClock === 1,
-    `ควรหักเฉพาะยอดจากแอป 1 ครั้ง แต่ระบบนับ ${pr.noClock} ครั้ง`);
-  console.log('✓ ยอด Excel ย้อนหลังไม่สร้างค่าปรับลืมลงเวลา · ยอดจากแอปยังใช้กติกาเดิม');
+  check('ไม่มีค่าปรับลืมลงเวลา ทั้งยอดนำเข้าและยอดจากแอป', pr.deduct === 0 && pr.noClock === undefined,
+    `หัก ${pr.deduct} บาท`);
+  console.log('✓ ยอด Excel ย้อนหลัง/ยอดจากแอป — ไม่มีค่าปรับลืมลงเวลา (ยกเลิกแล้ว 1 ต.ค. 69)');
 }
 
 // 4.5 ปฏิทินจองวันหยุด ต้องเริ่มที่ "พรุ่งนี้" และไม่มีวันซ้ำ
@@ -479,7 +479,19 @@ if (ownerHTML.pay && ownerHTML.pl) {
 }
 
 
-// 4.18 ต้องลงเวลาให้ครบเข้า-ออก — ลืมลงเวลา หัก 40 บาท/ครั้ง
+// 4.17.9 ส่งทีละ (ship_pack) — โซดา par 10 ส่งทีละ 12 (เจ้าของสั่ง 1 ต.ค. 69)
+{
+  check('โซดาเหลือ 9 → ส่ง 12', calc.shipNeed(10, 9, 12) === 12, `ได้ ${calc.shipNeed(10, 9, 12)}`);
+  check('โซดาเหลือ 0 → ส่ง 12', calc.shipNeed(10, 0, 12) === 12, `ได้ ${calc.shipNeed(10, 0, 12)}`);
+  check('โซดาเหลือ 10 → ไม่ต้องส่ง', calc.shipNeed(10, 10, 12) === 0, `ได้ ${calc.shipNeed(10, 10, 12)}`);
+  check('ขาดเกิน 1 แพ็ค → ส่ง 2 แพ็ค', calc.shipNeed(30, 0, 12) === 36, `ได้ ${calc.shipNeed(30, 0, 12)}`);
+  check('รายการทั่วไป (ส่งทีละ 1) ส่งตามที่ขาดพอดี', calc.shipNeed(8, 3, 1) === 5 && calc.shipNeed(8, 3, undefined) === 5, 'ไม่ตรง');
+  const pl = calc.pickList([{ id: 41, name: 'โซดาร๊อค', ship_pack: 12 }, { id: 0, name: 'แก้วเย็น' }], { 41: 10, 0: 8 }, { 41: 7, 0: 6 });
+  check('ใบจัดของใช้ส่งทีละ', pl.find(x => x.it.id === 41)?.need === 12 && pl.find(x => x.it.id === 0)?.need === 2, JSON.stringify(pl.map(x => x.need)));
+  console.log('✓ ส่งทีละ — โซดาต่ำกว่า 10 ขวด จัดไป 12 ขวด · รายการอื่นส่งตามที่ขาดพอดี');
+}
+
+// 4.18 ค่าปรับลืมลงเวลา — ยกเลิกแล้ว (1 ต.ค. 69)
 {
   const mk = clockRows => {
     const o = {}; clockRows.forEach(c => { o[c.clock_date] = { staff_name: 'ทดสอบ', open_yen: 10, open_pan: 5, ...c }; });
@@ -491,29 +503,18 @@ if (ownerHTML.pay && ownerHTML.pl) {
   const full = { clock_date: dates[0], time_in: '08:00', time_out: '18:00' };
   check('ลงครบไม่โดนหัก', mk([full]).deduct === 0, `ลงเวลาครบแต่โดนหัก ${mk([full]).deduct} บาท`);
 
+  // ยกเลิกค่าปรับลืมลงเวลาแล้ว (เจ้าของสั่ง 1 ต.ค. 69) — ไม่ลงเวลาเข้าก็เริ่มงานไม่ได้อยู่แล้ว
   const noOut = mk([{ clock_date: dates[0], time_in: '08:00', time_out: null }]);
-  check('ลืมลงเวลาออก หัก 40', noOut.noClock === 1 && noOut.deduct === 40, `นับได้ ${noOut.noClock} ครั้ง หัก ${noOut.deduct} บาท`);
-
-  const noIn = mk([{ clock_date: dates[0], time_in: null, time_out: '18:00' }]);
-  check('ลืมลงเวลาเข้า หัก 40', noIn.deduct === 40, `หัก ${noIn.deduct} บาท`);
-
+  check('ลืมลงเวลาออก ไม่หักแล้ว', noOut.deduct === 0, `หัก ${noOut.deduct} บาท`);
   const twice = mk([{ clock_date: dates[0], time_in: '08:00', time_out: null }, { clock_date: dates[1], time_in: null, time_out: null }]);
-  check('ลืม 2 ครั้ง หัก 80', twice.noClock === 2 && twice.deduct === 80, `นับได้ ${twice.noClock} ครั้ง หัก ${twice.deduct} บาท`);
-
-  // วันนี้ยังไม่จบ ยังไม่ถือว่าลืม (ยังกดลงเวลาออกได้อยู่)
-  const todayOpen = mk([{ clock_date: TODAY, time_in: '08:00', time_out: null }]);
-  check('วันนี้ยังไม่นับว่าลืม', todayOpen.noClock === 0 && todayOpen.deduct === 0,
-    `วันนี้ยังลงเวลาออกได้อยู่ แต่โดนนับว่าลืมไปแล้ว (${todayOpen.noClock} ครั้ง)`);
-
-  // เปิดร้านขายทั้งวันแต่ไม่มีการลงเวลาเลย ก็ถือว่าลืม
+  check('ลงเวลาไม่ครบ 2 วัน ไม่หักแล้ว', twice.deduct === 0, `หัก ${twice.deduct} บาท`);
   const soldNoClock = calc.payrollFor({
     branch: { staff_name: 'ทดสอบ', base_salary: 9000, days_off_quota: 31, holiday_work_days: 0 },
-    // created_by = ส่งยอดผ่านแอป (ถ้าไม่มี created_by = ยอด Excel ย้อนหลัง ซึ่งตั้งใจไม่หักลืมลงเวลา — ดูเทส 4.4)
     records: [{ record_date: dates[0], staff_name: 'ทดสอบ', sent: true, yen: 0, pan: 0, cash: 0, float_cash: 0, created_by: 'u-lnd' }],
     clocksByDate: {}, allDatesInMonth: dates, todayISO: TODAY, cfg,
   });
-  check('ขายแต่ไม่ลงเวลาเลย หัก 40', soldNoClock.deduct === 40, `หัก ${soldNoClock.deduct} บาท`);
-  console.log('✓ ลืมลงเวลา — หัก 40 บาท/ครั้ง ทั้งกรณีลืมเข้า/ลืมออก/ไม่ลงเลย · วันนี้ยังไม่นับ (ยังลงออกได้อยู่)');
+  check('มียอดแต่ไม่มีลงเวลา ไม่หักแล้ว', soldNoClock.deduct === 0, `หัก ${soldNoClock.deduct} บาท`);
+  console.log('✓ ค่าปรับลืมลงเวลา — ยกเลิกแล้ว ไม่หักทุกกรณี');
 }
 
 // 4.19 หัวหน้าไปทำแทน — ไม่หักมาสาย/ปิดไว แต่ยังต้องลงเวลาให้ครบ
@@ -531,9 +532,8 @@ if (ownerHTML.pay && ownerHTML.pl) {
     `หัวหน้าสาย 210 นาที ปิดไว 180 นาที ต้องไม่หัก แต่หัก ${veryLate.deduct} บาท`);
   check('หัวหน้าไม่โดนรีเซ็ตเบี้ยขยัน', veryLate.reset === false, 'หัวหน้าไม่มีเบี้ยขยันอยู่แล้ว ต้องไม่ตั้งธงรีเซ็ต');
   const forgot = mkR([{ clock_date: dates[0], time_in: '09:00', time_out: null }]);
-  check('หัวหน้าลืมลงเวลา ยังหัก 40', forgot.noClock === 1 && forgot.deduct === 40,
-    `ลืมลงเวลาออก ต้องหัก 40 แต่หัก ${forgot.deduct} บาท`);
-  console.log('✓ หัวหน้าไปทำแทน — ไม่หักมาสาย/ปิดไว แต่ลืมลงเวลายังหัก 40 บาท/ครั้ง');
+  check('หัวหน้าลืมลงเวลาออก ไม่หักแล้ว', forgot.deduct === 0, `หัก ${forgot.deduct} บาท`);
+  console.log('✓ หัวหน้าไปทำแทน — ไม่หักมาสาย/ปิดไว และไม่มีค่าปรับลืมลงเวลา');
 }
 
 // 4.20 ลงเวลาได้เฉพาะตอนอยู่ในรัศมีร้าน (GPS)
@@ -605,8 +605,6 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('ใช้ค่าจากตาราง settings', base.deduct === 10, `สาย 10 นาที × 1 บาท ควรหัก 10 ได้ ${base.deduct}`);
   const doubled = mkPay({ ...cfg.payRules, latePerMin: 2 });
   check('แก้ค่าปรับต่อนาทีแล้วมีผล', doubled.deduct === 20, `ตั้ง 2 บาท/นาที ควรหัก 20 ได้ ${doubled.deduct}`);
-  const fine100 = mkPay({ ...cfg.payRules, noClock: 100 });
-  check('แก้ค่าปรับลืมลงเวลาแล้วมีผล', fine100.deduct === 10, 'วันนี้ลงครบ ไม่ควรโดนค่าปรับลืมลงเวลา');
   console.log('✓ กติกาจ่าย/หัก อยู่ในตาราง settings แล้ว — เจ้าของแก้เองได้ ไม่ต้องแก้โค้ด');
 }
 

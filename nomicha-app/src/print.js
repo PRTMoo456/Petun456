@@ -102,7 +102,7 @@ export function staffSlipHTML(branch, pr, monthLabelStr, companies) {
      [`เบี้ยขยัน${pr.reset ? ' (โดนรีเซ็ตเดือนนี้)' : ''}`, pr.diligence],
      pr.holidayPay && [`ค่าทำงานวันหยุด (${branch.holiday_work_days || 0} วัน)`, pr.holidayPay],
      [`ค่าแก้ว (${pr.cups} ใบ)`, pr.cupPay],
-     pr.deduct && ['หัก สาย/ปิดไว/ไม่ลงเวลา/หยุดเกินโควตา', pr.deduct, true]],
+     pr.deduct && ['หัก สาย/ปิดไว/หยุดเกินโควตา', pr.deduct, true]],
     pr.total, monthLabelStr);
 }
 // relief = {name, role, first_name, last_name, national_id, base_salary, delivery_pay} — pr จาก calc.payrollForRelief()
@@ -116,7 +116,7 @@ export function reliefSlipHTML(relief, pr, monthLabelStr, companies) {
      ['เงินส่งของ', relief.delivery_pay],
      ['ค่าเช่าคลังกลาง', pr.whRent],
      [`ค่าแก้ว (${pr.cups} ใบ)`, pr.cupPay],
-     pr.deduct && [`หัก ลืมลงเวลา${pr.noClock ? ` ${pr.noClock} ครั้ง` : ''} (ไม่หักมาสาย/ปิดไว)`, pr.deduct, true]],
+     pr.deduct && ['รายการหัก', pr.deduct, true]],
     pr.total, monthLabelStr);
 }
 

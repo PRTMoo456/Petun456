@@ -114,6 +114,17 @@ const getRec = async (n) => (await pg.query(`select * from daily_records where b
   console.log('✓ บิลซื้อเป็นลัง+ชิ้น — เพิ่ม/แก้สต๊อกและต้นทุนถูกต้อง · แบบเดิมยังใช้ได้');
 }
 
+// ---------- 4. migration 014: ส่งทีละ + ลบค่าปรับลืมลงเวลาออกจากตั้งค่า ----------
+{
+  const soda = (await pg.query(`select ship_pack from stock_items where name = 'โซดาร๊อค'`)).rows[0];
+  const others = (await pg.query(`select count(*)::int n from stock_items where name <> 'โซดาร๊อค' and ship_pack <> 1`)).rows[0].n;
+  check('โซดาส่งทีละ 12', soda && soda.ship_pack === 12, JSON.stringify(soda));
+  check('รายการอื่นส่งทีละ 1', others === 0, `มี ${others} รายการที่ไม่ใช่ 1`);
+  let err = null; try { await pg.exec(`update stock_items set ship_pack = 0 where id = 0`); } catch (e) { err = e.message; }
+  check('ส่งทีละ 0 ไม่ได้', !!err, 'ยอมให้ตั้ง 0');
+  console.log('✓ ส่งทีละ — โซดา 12 ขวด รายการอื่น 1 · กันค่า 0');
+}
+
 console.log('');
 if (fails.length) { console.log('✗ ไม่ผ่าน ' + fails.length + ' ข้อ:'); fails.forEach(f => console.log('   • ' + f)); }
 else console.log('✓✓ ผ่านทุกข้อ');

@@ -16,8 +16,8 @@ export async function loadSettings() {
     diligenceRules: s.diligence_rules ?? { step: 500, cap: 1500, lateAllowance: 250 },
     holidayPayScale: s.holiday_pay_scale ?? [400, 450, 500, 550],
     overuseThresholdUnits: s.overuse_threshold_units ?? 0.5,
-    // กติกาจ่าย/หัก — ค่าแก้ว/บาทต่อนาทีที่สาย/ค่าปรับลืมลงเวลา/ค่าปรับหยุดเกินโควตา
-    payRules: { cupPay: 1, latePerMin: 1, earlyPerMin: 1, noClock: 40, excessDayOff: 330, ...(s.pay_rules || {}) },
+    // กติกาจ่าย/หัก — ค่าแก้ว/บาทต่อนาทีที่สาย/ค่าปรับหยุดเกินโควตา
+    payRules: { cupPay: 1, latePerMin: 1, earlyPerMin: 1, excessDayOff: 330, ...(s.pay_rules || {}) },
   };
   return cache;
 }

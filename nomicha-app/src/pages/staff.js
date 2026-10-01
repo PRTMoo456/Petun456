@@ -158,7 +158,7 @@ function homeTab(ctx) {
       ${!clockedIn && calc.lateMinutes(nowHM(), BRANCH.work_start, BRANCH.late_grace_min) > 0
         ? `<div class="note" style="margin-top:8px">ตอนนี้เลยเวลาเข้างานแล้ว ${calc.lateMinutes(nowHM(), BRANCH.work_start, BRANCH.late_grace_min)} นาที — กดลงเวลาเลยเพื่อไม่ให้สายเพิ่ม</div>` : ''}
       ${clockedIn && !clock.time_out
-        ? `<div class="note" style="margin-top:8px"><b>อย่าลืมกดลงเวลาออกก่อนกลับ</b> — ลืมลงเวลาหัก 40 บาท (ต้องลงให้ครบทั้งเข้าและออก)</div>` : ''}
+        ? `<div class="note" style="margin-top:8px"><b>อย่าลืมกดลงเวลาออกก่อนกลับ</b></div>` : ''}
       <p class="sub" style="margin:8px 0 0;font-size:12px">ลงเวลาได้เฉพาะตอนอยู่ที่ร้าน (ในระยะ ${N(BRANCH.gps_radius) || 100} เมตร) — ต้องเปิดตำแหน่ง/GPS ของเครื่องไว้</p>
       ${!clockedIn
         ? `<button class="btn primary big" id="clockInBtn" style="margin-top:12px">ลงเวลาเข้างาน</button>`
@@ -371,7 +371,7 @@ async function loadMeTab(ctx) {
         ${pr.holidayPay ? `<div class="payrow"><span>ค่าทำงานวันหยุด</span><span class="n">${baht(pr.holidayPay)}</span></div>` : ''}
         <div class="payrow"><span>ค่าแก้ว (${pr.cups} ใบ)</span><span class="n">${baht(pr.cupPay)}</span></div>
         <div class="payrow"><span>ใช้โควตาวันหยุด</span><span class="n">${pr.daysOffTaken} / ${BRANCH.days_off_quota} วัน</span></div>
-        ${pr.deduct ? `<div class="payrow neg"><span>หัก สาย ${pr.late} น. / ปิดไว ${pr.early} น.${pr.noClock ? ` / ลืมลงเวลา ${pr.noClock} ครั้ง` : ''}${pr.excess ? ` / หยุดเกิน ${pr.excess} วัน` : ''}</span><span class="n">−${baht(pr.deduct)}</span></div>` : ''}
+        ${pr.deduct ? `<div class="payrow neg"><span>หัก สาย ${pr.late} น. / ปิดไว ${pr.early} น.${pr.excess ? ` / หยุดเกิน ${pr.excess} วัน` : ''}</span><span class="n">−${baht(pr.deduct)}</span></div>` : ''}
       </div>
       <div class="note" style="margin-top:10px">ผ่อนผันมาสายรวมปิดไวได้ไม่เกิน ${cfg.diligenceRules.lateAllowance} นาที/เดือน เกินแล้วเบี้ยขยันเป็น 0</div>
     </div>

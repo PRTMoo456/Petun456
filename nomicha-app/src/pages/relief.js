@@ -576,9 +576,8 @@ async function renderClock(body) {
         <div class="payrow"><span>เงินส่งของ</span><span class="n">${baht(myEmp?.delivery_pay ?? 0)}</span></div>
         <div class="payrow"><span>ค่าเช่าคลังกลาง</span><span class="n">${baht(pr.whRent)}</span></div>
         <div class="payrow"><span>ค่าแก้ว (${pr.cups} ใบ)</span><span class="n">${baht(pr.cupPay)}</span></div>
-        ${pr.deduct ? `<div class="payrow neg"><span>หัก ลืมลงเวลา${pr.noClock ? ` ${pr.noClock} ครั้ง × 40` : ''}</span><span class="n">−${baht(pr.deduct)}</span></div>` : ''}
       </div>
-      <p class="sub" style="margin-top:8px">ไปทำแทนสาขาไม่หักมาสาย/ปิดไว — แต่ต้องลงเวลาให้ครบทั้งเข้าและออก ลืมหัก 40 บาท/ครั้ง</p>
+      <p class="sub" style="margin-top:8px">ไปทำแทนสาขาไม่หักมาสาย/ปิดไว — แต่ต้องลงเวลาเข้าก่อนถึงจะเริ่มงานได้</p>
     </div>`;
 
   const box = $('#clockBox');

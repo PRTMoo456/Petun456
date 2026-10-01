@@ -592,7 +592,7 @@ async function renderStockBranch(el, seg) {
     }
     const now = vals[0];
     const low = now != null && now <= it.min_qty;
-    const need = Math.max(0, (parByItemId[it.id] ?? 0) - (now || 0));
+    const need = calc.shipNeed(parByItemId[it.id] ?? 0, now || 0, it.ship_pack);
     return { it, now, used, need, low, vals };
   });
   const st0 = colStocks[0];
@@ -770,13 +770,13 @@ async function renderPay(body) {
       <td class="n ${p.pr.reset ? 'neg' : ''}">${baht(p.pr.diligence)}${p.pr.reset ? ' ⚠' : ''}</td>
       <td class="n">${baht(p.pr.holidayPay)}</td>
       <td class="n" title="${p.pr.cups} แก้ว">${baht(p.pr.cupPay)}</td>
-      <td class="n ${p.pr.deduct ? 'neg' : ''}" title="${[p.pr.daysOffTaken ? `ใช้วันหยุด ${p.pr.daysOffTaken}/${p.b.days_off_quota} วัน` : '', p.pr.late ? `สาย ${p.pr.late} นาที` : '', p.pr.early ? `ปิดไว ${p.pr.early} นาที` : '', p.pr.noClock ? `ลืมลงเวลา ${p.pr.noClock} ครั้ง` : '', p.pr.excess ? `หยุดเกินโควตา ${p.pr.excess} วัน` : ''].filter(Boolean).join(' · ') || 'ไม่มีรายการหัก'}">${p.pr.deduct ? '−' + baht(p.pr.deduct) : '0'}${p.pr.noClock ? ` <span class="sub">(ลืมลงเวลา ${p.pr.noClock})</span>` : ''}</td>
+      <td class="n ${p.pr.deduct ? 'neg' : ''}" title="${[p.pr.daysOffTaken ? `ใช้วันหยุด ${p.pr.daysOffTaken}/${p.b.days_off_quota} วัน` : '', p.pr.late ? `สาย ${p.pr.late} นาที` : '', p.pr.early ? `ปิดไว ${p.pr.early} นาที` : '', p.pr.excess ? `หยุดเกินโควตา ${p.pr.excess} วัน` : ''].filter(Boolean).join(' · ') || 'ไม่มีรายการหัก'}">${p.pr.deduct ? '−' + baht(p.pr.deduct) : '0'}</td>
       <td class="n" style="font-weight:600">${baht(p.pr.total)}</td></tr>`).join('');
   const reliefBaseAll = (relief?.base_salary ?? 0) + (relief?.delivery_pay ?? 0) + prR.whRent;
   const reliefRow = `<tr><td>${esc(relief?.name || 'หัวหน้า')} <span class="sub">คลังกลาง</span></td>
       <td class="n" title="ฐาน + เงินส่งของ + ค่าเช่าคลังกลาง">${baht(reliefBaseAll)}</td><td class="n">–</td><td class="n">–</td>
       <td class="n" title="${prR.cups} แก้ว">${baht(prR.cupPay)}</td>
-      <td class="n ${prR.deduct ? 'neg' : ''}" title="หัวหน้าไม่หักมาสาย/ปิดไว${prR.noClock ? ` · ลืมลงเวลา ${prR.noClock} ครั้ง` : ''}">${prR.deduct ? '−' + baht(prR.deduct) : '0'}${prR.noClock ? ` <span class="sub">(ลืมลงเวลา ${prR.noClock})</span>` : ''}</td>
+      <td class="n ${prR.deduct ? 'neg' : ''}" title="หัวหน้าไม่หักมาสาย/ปิดไว">${prR.deduct ? '−' + baht(prR.deduct) : '0'}</td>
       <td class="n" style="font-weight:600">${baht(prR.total)}</td></tr>`;
  
   const salaryTotal = payPeople.reduce((s, p) => s + p.pr.total, prR.total);
@@ -811,8 +811,8 @@ async function renderPay(body) {
     <div class="tablewrap"><table>
       <thead><tr><th>พนักงาน</th><th>ฐานเงินเดือน</th><th>เบี้ยขยัน</th><th>ทำงานวันหยุด</th><th>ค่าแก้ว</th><th>หัก (ขาด/ลา/มาสาย)</th><th>เงินเดือนสุทธิ</th></tr></thead>
       <tbody>${staffRows}${reliefRow}</tbody></table></div>
-    <p class="foot">แตะที่ช่อง "หัก" เพื่อดูว่ามาจากอะไร · <b>ลืมลงเวลา</b> (ลงไม่ครบทั้งเข้า-ออก) หัก 40 บาท/ครั้ง · มาสาย/ปิดไว หักนาทีละ 1 บาท —
-      <b>หัวหน้าไม่หักมาสาย/ปิดไว</b> เพราะไปทำแทนหลายสาขาคนละเวลา แต่ยังต้องลงเวลาให้ครบ ·
+    <p class="foot">แตะที่ช่อง "หัก" เพื่อดูว่ามาจากอะไร · มาสาย/ปิดไว หักนาทีละ 1 บาท —
+      <b>หัวหน้าไม่หักมาสาย/ปิดไว</b> เพราะไปทำแทนหลายสาขาคนละเวลา ·
       ยอดสุทธิคือจำนวนที่ต้องจ่ายจริงจากรายการทำงานในระบบ</p>
  
     <div class="card pad" style="margin-top:16px"><div class="between"><span class="eyebrow">รวมเงินเดือนที่ต้องจ่าย</span>
@@ -1181,6 +1181,7 @@ async function renderSet(body) {
     return `<div class="setrow"><span>${esc(it.name)} <span class="sub">(${esc(it.unit)})${usedByItem[it.id] ? ` · ใช้จริง 7 วันล่าสุด ${usedByItem[it.id]}` : ''}</span></span>
       <span class="row" style="flex-wrap:wrap;row-gap:6px;justify-content:flex-end">
       <span class="sub">ระดับต่อรอบ</span><input value="${p?.par_qty ?? 0}" data-par="${it.id}" data-parb="${pb.id}" style="width:64px">
+      <span class="sub">ส่งทีละ</span><input value="${it.ship_pack ?? 1}" data-shippack="${it.id}" inputmode="numeric" title="ขาดเมื่อไรจัดส่งเป็นทวีคูณของจำนวนนี้ (1 = ส่งตามที่ขาดพอดี) · ใช้ทุกสาขา" style="width:52px">
       <span class="sub">ราคาส่งสาขา</span><input value="${it.branch_price}" data-branchprice="${it.id}" style="width:64px"></span></div>`;
   }).join('');
  
@@ -1191,7 +1192,7 @@ async function renderSet(body) {
       <input value="${JSON.stringify(settingsByKey[k] ?? '')}" data-settingkey="${k}" style="width:110px"></div>`).join('');
  
   const structuredValues = {
-    pay_rules: { cupPay: 1, latePerMin: 1, earlyPerMin: 1, noClock: 40, excessDayOff: 330, ...(settingsByKey.pay_rules || {}) },
+    pay_rules: { cupPay: 1, latePerMin: 1, earlyPerMin: 1, excessDayOff: 330, ...(settingsByKey.pay_rules || {}) },
     diligence_rules: { step: 500, cap: 1500, lateAllowance: 250, ...(settingsByKey.diligence_rules || {}) },
     holiday_pay_scale: Array.isArray(settingsByKey.holiday_pay_scale) ? [...settingsByKey.holiday_pay_scale] : [400, 450, 500, 550],
     cup_price: { yen: 25, pan: 35, ...(settingsByKey.cup_price || {}) },
@@ -1199,7 +1200,7 @@ async function renderSet(body) {
   };
   const structuredGroups = [
     ['pay_rules', 'กติกาจ่าย/หัก', [['cupPay', 'ค่าแรงต่อแก้ว (บาท)'], ['latePerMin', 'หักเมื่อมาสาย (บาท/นาที)'],
-      ['earlyPerMin', 'หักเมื่อปิดร้านก่อนเวลา (บาท/นาที)'], ['noClock', 'หักเมื่อลืมลงเวลา (บาท/ครั้ง)'],
+      ['earlyPerMin', 'หักเมื่อปิดร้านก่อนเวลา (บาท/นาที)'],
       ['excessDayOff', 'หักวันหยุดเกินโควตา (บาท/วัน)']]],
     ['diligence_rules', 'เบี้ยขยัน', [['step', 'เพิ่มครั้งละ (บาท)'], ['cap', 'สูงสุด (บาท)'], ['lateAllowance', 'ผ่อนผันสายรวม (นาที/เดือน)']]],
     ['holiday_pay_scale', 'ค่าทำงานวันหยุด', [['0', 'ครั้งที่ 1'], ['1', 'ครั้งที่ 2'], ['2', 'ครั้งที่ 3'], ['3', 'ครั้งที่ 4']]],
@@ -1314,6 +1315,16 @@ async function renderSet(body) {
     const it=STOCK_ITEMS.find(x=>x.id===+inp.dataset.branchprice);if(it)it.branch_price=v;
     invalidateRefs();
     toast('บันทึกราคาใหม่แล้ว — ใช้อัตโนมัติกับรายการใหม่ ส่วนรายการเก่าใช้ราคาเดิม');
+  }));
+  body.querySelectorAll('input[data-shippack]').forEach(inp => inp.addEventListener('change', async () => {
+    const it = STOCK_ITEMS.find(x => x.id === +inp.dataset.shippack);
+    const v = readSetting(inp); if (v === null) return;
+    if (!Number.isInteger(v) || v < 1) { toast('"ส่งทีละ" ต้องเป็นจำนวนเต็มตั้งแต่ 1 (1 = ส่งตามที่ขาดพอดี)'); inp.value = it?.ship_pack ?? 1; return; }
+    const { error } = await supabase.from('stock_items').update({ ship_pack: v }).eq('id', +inp.dataset.shippack);
+    if (error) { toast('บันทึกไม่สำเร็จ: ' + error.message); return; }
+    if (it) it.ship_pack = v;
+    invalidateRefs();
+    toast(v > 1 ? `บันทึกแล้ว — ${it?.name || ''} ขาดเมื่อไรจัดส่งทีละ ${v} ${it?.unit || ''}` : `บันทึกแล้ว — ${it?.name || ''} ส่งตามที่ขาดพอดี`);
   }));
   body.querySelectorAll('input[data-settingkey]').forEach(inp => inp.addEventListener('change', async () => {
     let v; try { v = JSON.parse(inp.value); } catch { toast('กรอกค่าไม่ถูกต้อง (ใส่ตัวเลขหรือ true/false เท่านั้น)'); return; }
