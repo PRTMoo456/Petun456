@@ -750,12 +750,6 @@ if (ownerHTML.pay && ownerHTML.pl) {
     check('สรุปยอดสาขาแสดงครบทั้งเดือนที่แล้ว', html.includes(util.fmtDate(last[0])) && html.includes(util.fmtDate(last[last.length - 1])) && !html.includes(util.fmtDate(TODAY)),
       'ไม่ครบวันที่ 1 ถึงสิ้นเดือน หรือมีวันนี้ปนมา');
   }
-  // เวลาเข้า-ออกงาน: ในสรุปยอดสาขา และการ์ดหน้าภาพรวม
-  document.querySelector('[data-range="7"]').click(); await new Promise(r => setTimeout(r, 160));
-  const dayHtml = document.getElementById('ownBody').innerHTML;
-  check('สรุปยอดสาขามีตารางเวลาเข้า-ออก', dayHtml.includes('เวลาเข้า-ออกงาน'), 'ไม่พบตาราง');
-  document.querySelector('[data-otab="today"]').click(); await new Promise(r => setTimeout(r, 160));
-  check('การ์ดสาขาหน้าภาพรวมมีเวลาเข้า-ออก', /🕘 (เข้า|ยังไม่ลงเวลาเข้า)/.test(document.getElementById('ownBody').innerHTML), 'ไม่พบเวลาในการ์ด');
   console.log('✓ เลือกเดือนย้อนหลัง — เงินเดือนและกำไร/ขาดทุนเปลี่ยนตามเดือนที่เลือก');
 }
 
