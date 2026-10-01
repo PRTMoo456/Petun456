@@ -74,18 +74,18 @@ function clockTableHTML({ dates, clocksByBranch, records, dayOffs, reliefName })
   const rows = dates.filter(d => d <= TODAY).map(d => {
     const tds = order.map(b => {
       const c = clocksByBranch[b.id]?.[d];
-      if (c && !isRelief(c)) return `<td class="n" style="white-space:nowrap">${cell(c)}</td>`;
-      if (c && isRelief(c)) return `<td class="n sub">คนแทน</td>`;
-      if (offSet.has(b.id + '|' + d)) return `<td class="n sub">หยุด</td>`;
-      if (closedSet.has(b.id + '|' + d)) return `<td class="n sub">ปิดร้าน</td>`;
-      return `<td class="n sub">–</td>`;
+      if (c && !isRelief(c)) return `<td style="white-space:nowrap;text-align:center">${cell(c)}</td>`;
+      if (c && isRelief(c)) return `<td class="sub" style="text-align:center">คนแทน</td>`;
+      if (offSet.has(b.id + '|' + d)) return `<td class="sub" style="text-align:center">หยุด</td>`;
+      if (closedSet.has(b.id + '|' + d)) return `<td class="sub" style="text-align:center">ปิดร้าน</td>`;
+      return `<td class="sub" style="text-align:center">–</td>`;
     }).join('');
     const rel = order.map(b => ({ b, c: clocksByBranch[b.id]?.[d] })).filter(x => x.c && isRelief(x.c));
     const relTd = rel.length ? rel.map(x => `${cell(x.c)}<div class="sub">${esc(x.b.name)}</div>`).join('') : '<span class="sub">–</span>';
-    return `<tr><td style="white-space:nowrap">${fmtDate(d)}</td>${tds}<td class="n" style="white-space:nowrap">${relTd}</td></tr>`;
+    return `<tr><td style="white-space:nowrap;text-align:center">${fmtDate(d)}</td>${tds}<td style="white-space:nowrap;text-align:center">${relTd}</td></tr>`;
   }).reverse().join('');
   return `<div class="tablewrap"><table>
-    <thead><tr><th>วันที่</th>${order.map(b => `<th>${esc(b.name)}</th>`).join('')}<th>คนแทน</th></tr></thead>
+    <thead><tr><th style="text-align:center">วันที่</th>${order.map(b => `<th style="text-align:center">${esc(b.name)}</th>`).join('')}<th style="text-align:center">คนแทน</th></tr></thead>
     <tbody>${rows || `<tr><td colspan="${order.length + 2}" class="sub">ยังไม่มีข้อมูลเดือนนี้</td></tr>`}</tbody></table></div>
     <p class="foot">แต่ละช่อง = เวลาเข้างาน : เวลาออกงาน · "หยุด" = วันหยุดที่จองไว้ · "คนแทน" = หัวหน้าไปทำแทน (เวลาอยู่คอลัมน์คนแทน)</p>`;
 }
