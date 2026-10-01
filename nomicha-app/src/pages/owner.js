@@ -14,7 +14,7 @@ import * as calc from '../calc.js';
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
 let monthPayrollCache = null;
 let tabLoadTicket = 0;
-let S = { tab: 'today', schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, purchaseOpen: false, purchaseShowAll: false, purchaseItemId: null, purchaseQty: '', purchaseLoose: '', purchasePrice: '', purchaseEditing: null, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
+let S = { tab: 'today', month: null, schedMonth: null, stockNeedOnly: false, extOpen: false, extBuyer: '', extDraft: {}, extEditing: null, extEditDraft: {}, purchaseOpen: false, purchaseShowAll: false, purchaseItemId: null, purchaseQty: '', purchaseLoose: '', purchasePrice: '', purchaseEditing: null, viewBranch: null, range: 7, editing: null, editDraft: {}, fullEditing: null, fullDraft: null, fullOpen: null, addingDate: null, addDraft: null, addOpen: null, addPrev: null, stockBranch: null, stockView: 'branch', stockRange: 7 };
 // บิลนำเข้า (ลัง + ชิ้น) — สินค้าที่เลือก และข้อความสรุปต้นทุนต่อหน่วยใต้ช่องกรอก
 const ownPurchItem = () => STOCK_ITEMS.find(x => String(x.id) === String(S.purchaseItemId)) || STOCK_ITEMS[0];
 function ownPurchPreviewText() {
@@ -57,6 +57,27 @@ function selectOwnerTab(tab) {
   return loadTab();
 }
  
+/* เดือนที่เลือกดู (เงินเดือน · กำไร/ขาดทุน · ปริ้นสรุปส่งของทั้งเดือน) — ค่าเริ่มต้นคือเดือนปัจจุบัน
+   ดูย้อนหลังได้ 12 เดือน (เจ้าของสั่ง 1 ต.ค. 69 — ต้นเดือนต้องดูยอด/จ่ายเงินเดือนของเดือนที่แล้ว) */
+const selMonth = () => S.month || TODAY.slice(0, 7);
+const selDates = () => monthDates(selMonth() + '-01');
+const isThisMonth = () => selMonth() === TODAY.slice(0, 7);
+function monthOptions() {
+  const out = []; const d = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 1, 1);
+  for (let i = 0; i < 12; i++) {
+    const mk = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    out.push({ mk, label: monthLabel(mk + '-01') + (i === 0 ? ' (เดือนนี้)' : '') });
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
+}
+const monthPickerHTML = id => `<select id="${id}" class="ctl" style="width:auto">${monthOptions().map(m =>
+  `<option value="${m.mk}" ${m.mk === selMonth() ? 'selected' : ''}>${m.label}</option>`).join('')}</select>`;
+function wireMonthPicker(id, rerender) {
+  const el = $('#' + id); if (!el) return;
+  el.addEventListener('change', () => { S.month = el.value; monthPayrollCache = null; rerender(); });
+}
+
 async function loadTab() {
   const body = $('#ownBody'); if (!body) return;
   const ticket=++tabLoadTicket,tab=S.tab;
@@ -698,7 +719,7 @@ async function renderStockDeliveries(el, seg) {
  
   el.innerHTML = `${stockHeadBar(seg, b)}
     <div class="between" style="margin-bottom:10px"><span class="sub">ประวัติการส่งของ สาขา${esc(b.name)}</span>
-      <button class="mini" id="deliveryMonthPrintBtn">ปริ้นสรุปส่งของทั้งเดือน (ทุกสาขา)</button></div>
+      <span class="row" style="gap:8px">${monthPickerHTML('dlvMonthSel')}<button class="mini" id="deliveryMonthPrintBtn">ปริ้นสรุปส่งของทั้งเดือน (ทุกสาขา)</button></span></div>
     ${cards || '<p class="sub">สาขานี้ยังไม่มีประวัติการส่งของ</p>'}
     <p class="foot">แตะแถวเพื่อดูรายการวัตถุดิบทีละตัว · "ได้รับจริง" มาจากที่พนักงานสาขากรอกเช็ค "วัตถุดิบนำเข้า" ตอนปิดยอด · ⚠ = ผลต่างเกิน ${overuse} หน่วยของรายการนั้น</p>`;
   $('#sviewSel').addEventListener('change', e => { S.stockBranch = e.target.value; renderStockView(seg); });
@@ -710,13 +731,14 @@ async function renderStockDeliveries(el, seg) {
     const html = deliveryReportHTML({ dlv, branch: b, roundName, staffName: staffEmp?.name, reliefName: relief?.name, reliefRole: 'หัวหน้า', stockItems: STOCK_ITEMS, companies, overuse });
     printDoc(html, 'ไม่พบรอบส่งของนี้');
   }));
+  const dms = $('#dlvMonthSel'); if (dms) dms.addEventListener('change', () => { S.month = dms.value; monthPayrollCache = null; });
   const mp = $('#deliveryMonthPrintBtn'); if (mp) mp.addEventListener('click', async () => {
-    const dates = monthDates(TODAY);
+    const dates = selDates();
     const { data: monthDlv } = await supabase.from('deliveries').select('*').gte('delivery_date', dates[0]).lte('delivery_date', dates[dates.length - 1]).order('delivery_date');
     const withRound = (monthDlv || []).map(x => ({ ...x, round_name: (ROUNDS.find(r => r.id === x.round_id) || {}).name || x.round_id }));
     const companies = await getCompanies();
     const html = deliveryMonthHTML({ list: withRound, branches: BRANCHES, stockItems: STOCK_ITEMS, monthLabelStr: monthLabel(dates[dates.length - 1]), companies });
-    printDoc(html, 'เดือนนี้ยังไม่มีการส่งของ');
+    printDoc(html, 'เดือนที่เลือกยังไม่มีการส่งของ');
   });
 }
  
@@ -724,10 +746,10 @@ async function renderStockDeliveries(el, seg) {
    ชุดข้อมูล+สูตรเงินเดือนของเดือนนี้ ใช้ร่วมกันทั้งแท็บ "เงินเดือน" และแท็บ "กำไร/ขาดทุน"
    (เดิมสองแท็บดึงข้อมูลและคำนวณแยกกันคนละชุด ถ้าแก้สูตรที่เดียวลืมอีกที่ ตัวเลขค่าแรงสองหน้าจะไม่ตรงกันทันที) */
 async function loadMonthPayroll() {
-  const cacheKey = TODAY.slice(0, 7);
+  const cacheKey = selMonth();
   if (monthPayrollCache && monthPayrollCache.key === cacheKey && Date.now() - monthPayrollCache.at < 30000) return monthPayrollCache.data;
   const cfg = getSettings();
-  const dates = monthDates(TODAY);
+  const dates = selDates();
   const [{ data: allRecords }, { data: allClocks }, { data: whRentRows }, { data: employees }] = await Promise.all([
     supabase.from('daily_records').select('*').gte('record_date', dates[0]).lte('record_date', dates[dates.length - 1]),
     supabase.from('clock_records').select('*').gte('clock_date', dates[0]).lte('clock_date', dates[dates.length - 1]),
@@ -806,8 +828,9 @@ async function renderPay(body) {
     return `<tr><td>${esc(b ? b.name : r.branch_id)}</td><td class="n">${fmtDate(r.remit_date)}</td><td class="n">${baht(N(r.amount))}</td></tr>`;
   }).join('');
  
-  body.innerHTML = `<div class="between" style="margin-bottom:14px"><h3 style="margin:0">เงินเดือน — เดือนนี้</h3>
-      <button class="mini" id="printAllSlipsBtn">ส่งออกสลิปทุกคน</button></div>
+  body.innerHTML = `<div class="between" style="margin-bottom:14px;flex-wrap:wrap;gap:8px"><h3 style="margin:0">เงินเดือน — ${monthLabel(selMonth() + '-01')}</h3>
+      <span class="row" style="gap:8px">${monthPickerHTML('payMonthSel')}<button class="mini" id="printAllSlipsBtn">ส่งออกสลิปทุกคน</button></span></div>
+    ${isThisMonth() ? '' : '<p class="sub" style="margin:-6px 0 10px">ดูย้อนหลัง — ฐานเงินเดือน/วันทำงานวันหยุด/เงินส่งของ ใช้ค่าที่ตั้งอยู่ตอนนี้</p>'}
     <div class="tablewrap"><table>
       <thead><tr><th>พนักงาน</th><th>ฐานเงินเดือน</th><th>เบี้ยขยัน</th><th>ทำงานวันหยุด</th><th>ค่าแก้ว</th><th>หัก (ขาด/ลา/มาสาย)</th><th>เงินเดือนสุทธิ</th></tr></thead>
       <tbody>${staffRows}${reliefRow}</tbody></table></div>
@@ -835,13 +858,14 @@ async function renderPay(body) {
     <div class="tablewrap"><table><thead><tr><th>วันที่รับ</th><th>จำนวน</th><th>วิธี</th></tr></thead>
       <tbody>${headLogRows || '<tr><td colspan="3" class="sub">ยังไม่มีประวัติ</td></tr>'}</tbody></table></div>`;
  
+  wireMonthPicker('payMonthSel', () => renderPay(body));
   const ps = $('#printAllSlipsBtn'); if (ps) ps.addEventListener('click', async () => {
     const [companies, { data: priv }] = await Promise.all([
       getCompanies(),
       supabase.from('employee_private').select('*'),   // เลขบัตรประชาชนขึ้นสลิป — เจ้าของเท่านั้นที่อ่านได้ทั้งหมด
     ]);
     const nidOf = id => ((priv || []).find(x => x.employee_id === id) || {}).national_id || '';
-    const mLabel = monthLabel(monthDates(TODAY).slice(-1)[0]);
+    const mLabel = monthLabel(selMonth() + '-01');
     const html = payPeople.map(p => staffSlipHTML(
       { name: p.b.name, staff_name: p.name, first_name: p.emp?.first_name, last_name: p.emp?.last_name, national_id: nidOf(p.emp?.id),
         base_salary: p.base, holiday_work_days: p.b.holiday_work_days || 0 }, p.pr, mLabel, companies)).join('')
@@ -862,7 +886,7 @@ async function renderPay(body) {
 /* ============================== กำไร/ขาดทุน ============================== */
 async function renderPL(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
-  const dates = monthDates(TODAY);
+  const dates = selDates();
   let purchasesQuery = supabase.from('purchases').select('*').order('purchase_date', { ascending: false });
   if (!S.purchaseShowAll) purchasesQuery = purchasesQuery.limit(10);
   const [{ cfg, clocksByDateAll, employees, payPeople, prR }, { data: branchRentRows }, { data: deliveries }, { data: repairs }, { data: purchases }, { data: whStock, error: whError }, { data: externalSales }] = await Promise.all([
@@ -961,7 +985,7 @@ async function renderPL(body) {
   }).join('');
  
   body.innerHTML = `
-    <h3 style="margin:0 0 14px">กำไร/ขาดทุน — เดือนนี้</h3>
+    <div class="between" style="margin:0 0 14px;flex-wrap:wrap;gap:8px"><h3 style="margin:0">กำไร/ขาดทุน — ${monthLabel(selMonth() + '-01')}</h3>${monthPickerHTML('plMonthSel')}</div>
     <div class="kpis">
       <div class="card kpi"><div class="eyebrow">ยอดขายรวม ${BRANCHES.length} สาขา</div><div class="v">${baht(totSales)}</div></div>
       <div class="card kpi"><div class="eyebrow">ต้นทุนวัตถุดิบรวม</div><div class="v">${baht(totMat)}</div></div>
@@ -1032,6 +1056,7 @@ async function renderPL(body) {
     const html = externalBillHTML({ sale, issuerName: issuerNames[sale.issuer], stockItems: STOCK_ITEMS, companies, viewerRole: 'owner' });
     printDoc(html, 'ไม่พบบิลนี้');
   }));
+  wireMonthPicker('plMonthSel', () => renderPL(body));
   body.querySelectorAll('[data-purchedit]').forEach(btn => btn.addEventListener('click', () => {
     S.purchaseEditing = S.purchaseEditing === btn.dataset.purchedit ? null : btn.dataset.purchedit;
     renderPL(body);
@@ -1112,7 +1137,7 @@ async function renderPL(body) {
   const emb = $('#extMonthPrintBtn'); if (emb) emb.addEventListener('click', async () => {
     const companies = await getCompanies();
     const html = externalMonthHTML({ list: extThisMonth, monthLabelStr: monthLabel(dates[dates.length - 1]), companies, viewerRole: 'owner' });
-    printDoc(html, 'เดือนนี้ยังไม่มีบิลขายนอก');
+    printDoc(html, 'เดือนที่เลือกยังไม่มีบิลขายนอก');
   });
   const rt = $('#repairToggleBtn'); if (rt) rt.addEventListener('click', () => { S.repairOpen = !S.repairOpen; renderPL(body); });
   const rs = $('#repairSubmitBtn'); if (rs) rs.addEventListener('click', async () => {

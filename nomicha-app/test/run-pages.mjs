@@ -715,6 +715,33 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log('✓ แก้บิลนำเข้าผ่านหน้าจอจริง — พิมพ์ราคาแบบมีคอมม่าบันทึกถูกต้อง');
 }
 
+// 4.22.2b เลือกเดือนย้อนหลัง — เงินเดือน / กำไรขาดทุน (เจ้าของสั่ง 1 ต.ค. 69)
+{
+  root.innerHTML = '<div id="roleRoot"></div>';
+  const ownerM = await import('../src/pages/owner.js?v=month');
+  await ownerM.renderOwnerApp(document.getElementById('roleRoot'), db.employees.find(e => e.id === 'u-own'));
+  await new Promise(r => setTimeout(r, 100));
+  const util = await import('../src/util.js');
+  const d = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 2, 1);
+  const prevMk = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const prevLabel = util.monthLabel(prevMk + '-01');
+  // ยอดของเดือนก่อน ต้องเข้าเงินเดือนเมื่อเลือกเดือนก่อน และไม่เข้าเดือนนี้
+  document.querySelector('[data-otab="pay"]').click();
+  await new Promise(r => setTimeout(r, 160));
+  const sel = document.getElementById('payMonthSel');
+  check('หน้าเงินเดือนมีตัวเลือกเดือน', !!sel && sel.options.length === 12, sel ? `มี ${sel.options.length} เดือน` : 'ไม่พบ');
+  if (sel) {
+    sel.value = prevMk; sel.dispatchEvent(new dom.window.Event('change'));
+    await new Promise(r => setTimeout(r, 160));
+    check('หัวข้อเงินเดือนเปลี่ยนเป็นเดือนที่เลือก', document.getElementById('ownBody').innerHTML.includes(`เงินเดือน — ${prevLabel}`), 'หัวข้อไม่เปลี่ยน');
+  }
+  document.querySelector('[data-otab="pl"]').click();
+  await new Promise(r => setTimeout(r, 160));
+  check('กำไรขาดทุนจำเดือนที่เลือกไว้', document.getElementById('ownBody').innerHTML.includes(`กำไร/ขาดทุน — ${prevLabel}`), 'ไม่ได้ใช้เดือนที่เลือก');
+  check('กำไรขาดทุนมีตัวเลือกเดือน', !!document.getElementById('plMonthSel'), 'ไม่พบตัวเลือกเดือน');
+  console.log('✓ เลือกเดือนย้อนหลัง — เงินเดือนและกำไร/ขาดทุนเปลี่ยนตามเดือนที่เลือก');
+}
+
 // 4.22.3 หัวหน้าบันทึกบิลซื้อผ่านหน้าจอจริง — ไม่เปลี่ยนรายการ (ใช้รายการแรกที่ขึ้นอยู่) และพิมพ์ราคามีคอมม่า
 {
   root.innerHTML = '<div id="roleRoot"></div>';
