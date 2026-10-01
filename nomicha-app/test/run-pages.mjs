@@ -739,6 +739,17 @@ if (ownerHTML.pay && ownerHTML.pl) {
   await new Promise(r => setTimeout(r, 160));
   check('กำไรขาดทุนจำเดือนที่เลือกไว้', document.getElementById('ownBody').innerHTML.includes(`กำไร/ขาดทุน — ${prevLabel}`), 'ไม่ได้ใช้เดือนที่เลือก');
   check('กำไรขาดทุนมีตัวเลือกเดือน', !!document.getElementById('plMonthSel'), 'ไม่พบตัวเลือกเดือน');
+  document.querySelector('[data-otab="day"]').click();
+  await new Promise(r => setTimeout(r, 160));
+  const prevBtn = document.querySelector('[data-range="prev"]');
+  check('สรุปยอดสาขามีปุ่มเดือนที่แล้ว', !!prevBtn, 'ไม่พบปุ่ม');
+  if (prevBtn) {
+    prevBtn.click(); await new Promise(r => setTimeout(r, 160));
+    const html = document.getElementById('ownBody').innerHTML;
+    const last = util.monthDates(prevMk + '-01');
+    check('สรุปยอดสาขาแสดงครบทั้งเดือนที่แล้ว', html.includes(util.fmtDate(last[0])) && html.includes(util.fmtDate(last[last.length - 1])) && !html.includes(util.fmtDate(TODAY)),
+      'ไม่ครบวันที่ 1 ถึงสิ้นเดือน หรือมีวันนี้ปนมา');
+  }
   console.log('✓ เลือกเดือนย้อนหลัง — เงินเดือนและกำไร/ขาดทุนเปลี่ยนตามเดือนที่เลือก');
 }
 

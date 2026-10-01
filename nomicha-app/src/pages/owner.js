@@ -181,6 +181,8 @@ async function renderToday(body) {
  
 /* ============================== สรุปยอดสาขา (แก้ย้อนหลัง) ============================== */
 function dateRange(days) {
+  // 'prev' = เดือนที่แล้วทั้งเดือน (เจ้าของสั่ง 1 ต.ค. 69) — เรียงวันล่าสุดก่อนเหมือนช่วงอื่น
+  if (days === 'prev') { const p = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 2, 1); return monthDates(isoDate(p)).reverse(); }
   const out = []; const d0 = new Date(TODAY + 'T00:00:00');
   const n = days === 'month' ? d0.getDate() : days;
   // isoDate() ไม่ใช่ toISOString() — ที่ไทยจะได้วันที่เลื่อนไป 1 วัน ทำให้ตารางสรุปยอดดึงข้อมูลผิดวัน
@@ -306,6 +308,7 @@ async function renderDay(body) {
           <button data-range="7" aria-pressed="${S.range === 7}">7 วัน</button>
           <button data-range="14" aria-pressed="${S.range === 14}">14 วัน</button>
           <button data-range="month" aria-pressed="${S.range === 'month'}">เดือนนี้</button>
+          <button data-range="prev" aria-pressed="${S.range === 'prev'}">เดือนที่แล้ว</button>
         </span>
       </span>
     </div>
@@ -338,7 +341,7 @@ async function renderDay(body) {
   $('#bviewSel').addEventListener('change', e => {
     S.viewBranch=e.target.value;S.editing=null;S.fullEditing=null;S.fullDraft=null;S.addingDate=null;S.addDraft=null;loadTab();
   });
-  body.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', () => { S.range = btn.dataset.range === 'month' ? 'month' : +btn.dataset.range; loadTab(); }));
+  body.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', () => { S.range = ['month', 'prev'].includes(btn.dataset.range) ? btn.dataset.range : +btn.dataset.range; loadTab(); }));
   body.querySelectorAll('[data-edit]').forEach(btn => btn.addEventListener('click', () => { S.editing = btn.dataset.edit; S.editDraft = {}; loadTab(); }));
   body.querySelectorAll('[data-fulledit]').forEach(btn => btn.addEventListener('click', () => {
     const rec = (records || []).find(r => r.id === btn.dataset.fulledit); if (!rec) return;
