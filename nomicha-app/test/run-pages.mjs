@@ -363,6 +363,17 @@ if (ownerHTML.pay && ownerHTML.pl) {
     'หัวหน้าส่งยอดได้ทั้งที่ยังไม่ได้นับแก้วก่อนขาย → ยอดขายวันนั้นจะกลายเป็น 0');
   check('ต้องขึ้นการ์ดนับแก้วก่อน', /id="rOpenCountBtn"/.test(h), 'ไม่ขึ้นการ์ดให้นับแก้วก่อนขาย');
   console.log('✓ หัวหน้าไปแทนสาขา — บังคับนับแก้วก่อนขายให้เสร็จก่อน ถึงจะปิดยอดได้');
+  // ปุ่มเดือนก่อน/เดือนนี้ในการ์ดเงินเดือนหัวหน้า + วันเริ่มงาน
+  const rel = db.employees.find(e => e.id === 'u-rel'); const oldStart = rel.start_date; rel.start_date = TODAY.slice(0, 8) + '01';
+  const pbtn = document.querySelector('[data-rpaymonth="prev"]');
+  check('หัวหน้ามีปุ่มเดือนก่อน', !!pbtn, 'ไม่พบปุ่ม');
+  if (pbtn) {
+    pbtn.click(); await new Promise(r => setTimeout(r, 200));
+    check('เดือนก่อนเริ่มงาน หัวหน้าขึ้นว่ายังไม่มีเงินเดือน', /ยังไม่มีเงินเดือนเดือนนี้/.test(root.innerHTML), 'ไม่ขึ้นข้อความ');
+    document.querySelector('[data-rpaymonth="this"]').click(); await new Promise(r => setTimeout(r, 200));
+    check('เดือนนี้หัวหน้าเห็นเงินเดือนปกติ', /ประมาณการเดือนนี้/.test(root.innerHTML), 'ไม่กลับมาเดือนนี้');
+  }
+  rel.start_date = oldStart;
 }
 
 // 4.13 พิมพ์ตัวเลขมีคอมมา ต้องไม่กลายเป็น 0 เงียบ ๆ
@@ -547,6 +558,14 @@ if (ownerHTML.pay && ownerHTML.pl) {
   const forgot = mkR([{ clock_date: dates[0], time_in: '09:00', time_out: null }]);
   check('หัวหน้าลืมลงเวลาออก ไม่หักแล้ว', forgot.deduct === 0, `หัก ${forgot.deduct} บาท`);
   console.log('✓ หัวหน้าไปทำแทน — ไม่หักมาสาย/ปิดไว และไม่มีค่าปรับลืมลงเวลา');
+  {
+    const base = { relief: { name: 'ขวัญ', base_salary: 9000, delivery_pay: 5000, start_date: '2026-10-01' }, allBranchRecords: [], allBranchClocksByDate: {}, todayISO: TODAY, cfg, whRent: 2000 };
+    const sep = calc.payrollForRelief({ ...base, monthEnd: '2026-09-30' });
+    const oct = calc.payrollForRelief({ ...base, monthEnd: '2026-10-31' });
+    check('หัวหน้ายังไม่เริ่มงาน เดือนก่อนไม่มีเงินเดือน', sep.total === 0 && sep.notStarted === true, `ได้ ${sep.total}`);
+    check('เดือนที่เริ่มงานได้เงินเดือนเต็ม', oct.total === 16000 && !oct.notStarted, `ได้ ${oct.total}`);
+    console.log('✓ วันเริ่มงานหัวหน้า — เดือนก่อนเริ่มงานเงินเดือน 0 · เดือนที่เริ่มคิดปกติ');
+  }
 }
 
 // 4.20 ลงเวลาได้เฉพาะตอนอยู่ในรัศมีร้าน (GPS)

@@ -807,8 +807,8 @@ async function loadMonthPayroll() {
     return { key: b.id, b, records, emp, name: emp?.name || '(ยังไม่ผูกบัญชี)', place: b.name, base: emp?.base_salary ?? 0, pr };
   });
   const prR = calc.payrollForRelief({
-    relief: { name: relief?.name, base_salary: relief?.base_salary ?? 0, delivery_pay: relief?.delivery_pay ?? 0 },
-    allBranchRecords: allRecords || [], allBranchClocksByDate: clocksByDateAll, todayISO: TODAY, cfg, whRent,
+    relief: { name: relief?.name, base_salary: relief?.base_salary ?? 0, delivery_pay: relief?.delivery_pay ?? 0, start_date: relief?.start_date },
+    allBranchRecords: allRecords || [], allBranchClocksByDate: clocksByDateAll, todayISO: TODAY, cfg, whRent, monthEnd: dates[dates.length - 1],
   });
   const data = { cfg, dates, allRecords: allRecords || [], clocksByDateAll, employees: employees || [], relief, whRent, payPeople, prR };
   monthPayrollCache = { key: cacheKey, at: Date.now(), data };
@@ -832,8 +832,10 @@ async function renderPay(body) {
       <td class="n" title="${p.pr.cups} แก้ว">${baht(p.pr.cupPay)}</td>
       <td class="n ${p.pr.deduct ? 'neg' : ''}" title="${[p.pr.daysOffTaken ? `ใช้วันหยุด ${p.pr.daysOffTaken}/${p.b.days_off_quota} วัน` : '', p.pr.late ? `สาย ${p.pr.late} นาที` : '', p.pr.early ? `ปิดไว ${p.pr.early} นาที` : '', p.pr.excess ? `หยุดเกินโควตา ${p.pr.excess} วัน` : ''].filter(Boolean).join(' · ') || 'ไม่มีรายการหัก'}">${p.pr.deduct ? '−' + baht(p.pr.deduct) : '0'}</td>
       <td class="n" style="font-weight:600">${baht(p.pr.total)}</td></tr>`).join('');
-  const reliefBaseAll = (relief?.base_salary ?? 0) + (relief?.delivery_pay ?? 0) + prR.whRent;
-  const reliefRow = `<tr><td>${esc(relief?.name || 'หัวหน้า')} <span class="sub">คลังกลาง</span></td>
+  const reliefBaseAll = prR.notStarted ? 0 : (relief?.base_salary ?? 0) + (relief?.delivery_pay ?? 0) + prR.whRent;
+  const reliefRow = prR.notStarted
+    ? `<tr><td>${esc(relief?.name || 'หัวหน้า')} <span class="sub">คลังกลาง</span></td><td colspan="5" class="sub" style="text-align:center">ยังไม่เริ่มงาน (เริ่ม ${fmtDate(prR.startDate)})</td><td class="n" style="font-weight:600">0</td></tr>`
+    : `<tr><td>${esc(relief?.name || 'หัวหน้า')} <span class="sub">คลังกลาง</span></td>
       <td class="n" title="ฐาน + เงินส่งของ + ค่าเช่าคลังกลาง">${baht(reliefBaseAll)}</td><td class="n">–</td><td class="n">–</td>
       <td class="n" title="${prR.cups} แก้ว">${baht(prR.cupPay)}</td>
       <td class="n ${prR.deduct ? 'neg' : ''}" title="หัวหน้าไม่หักมาสาย/ปิดไว">${prR.deduct ? '−' + baht(prR.deduct) : '0'}</td>
@@ -910,8 +912,8 @@ async function renderPay(body) {
     const html = payPeople.map(p => staffSlipHTML(
       { name: p.b.name, staff_name: p.name, first_name: p.emp?.first_name, last_name: p.emp?.last_name, national_id: nidOf(p.emp?.id),
         base_salary: p.base, holiday_work_days: p.b.holiday_work_days || 0 }, p.pr, mLabel, companies)).join('')
-      + reliefSlipHTML({ name: relief?.name || 'หัวหน้า', role: 'หัวหน้า', first_name: relief?.first_name, last_name: relief?.last_name,
-        national_id: nidOf(relief?.id), base_salary: relief?.base_salary ?? 0, delivery_pay: relief?.delivery_pay ?? 0 }, prR, mLabel, companies);
+      + (prR.notStarted ? '' : reliefSlipHTML({ name: relief?.name || 'หัวหน้า', role: 'หัวหน้า', first_name: relief?.first_name, last_name: relief?.last_name,
+        national_id: nidOf(relief?.id), base_salary: relief?.base_salary ?? 0, delivery_pay: relief?.delivery_pay ?? 0 }, prR, mLabel, companies));
     printDoc(html, 'ยังไม่มีสลิปให้ออก');
   });
   const hc = $('#ownerConfirmHeadBtn'); if (hc) hc.addEventListener('click', async () => {

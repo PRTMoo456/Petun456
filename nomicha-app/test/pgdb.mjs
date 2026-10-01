@@ -24,7 +24,8 @@ const SUPABASE_SHIM = `
 export const MIGRATIONS = ['006_simplify_harden_and_snapshot.sql', '008_day_off_booking_window.sql',
   '009_reconcile_unstaffed_leave_days.sql', '011_edit_warehouse_purchase.sql', '012_day_off_booking_window_4_days.sql',
   '013_purchase_loose_qty.sql',
-  '014_ship_pack_and_no_clock_fine.sql'];
+  '014_ship_pack_and_no_clock_fine.sql',
+  '015_employee_start_date.sql'];
 
 export async function makePg() {
   const pg = new PGlite();

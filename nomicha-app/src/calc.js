@@ -117,7 +117,10 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, tod
 /* พอร์ตจาก payrollForRelief() — เงินเดือนหัวหน้า (ไม่ผูกสาขาเดียว วนดูทุกสาขาที่ไปแทน)
    ต่างจากพนักงานสาขา (เจ้าของสั่งแก้ 5 ก.ย. 69): หัวหน้าไปทำแทนหลายสาขาคนละเวลา บางวันต้องไปส่งของก่อนแล้วค่อยไปเปิดร้าน
    จึงไม่หัก "มาสาย/ปิดไว" กับหัวหน้า (ค่าปรับลืมลงเวลายกเลิกแล้วทั้งระบบ 1 ต.ค. 69) — หัวหน้าจึงไม่มีรายการหัก */
-export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDate, todayISO, cfg, whRent }) {
+export function payrollForRelief({ relief, allBranchRecords, allBranchClocksByDate, todayISO, cfg, whRent, monthEnd }) {
+  // เดือนที่จบก่อนวันเริ่มงาน = ยังไม่ได้เป็นพนักงาน ไม่มีเงินเดือนเลย (หัวหน้าเริ่มงาน 1 ต.ค. 69)
+  if (relief.start_date && monthEnd && monthEnd < relief.start_date)
+    return { cups: 0, deduct: 0, cupPay: 0, whRent: 0, total: 0, diligence: 0, holidayPay: 0, reset: false, late: 0, early: 0, notStarted: true, startDate: relief.start_date };
   let cups = 0;
   allBranchRecords.forEach(r => {
     if (!r.store_closed && r.sent && r.staff_name === relief.name) {

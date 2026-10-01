@@ -542,14 +542,18 @@ async function doHeadRemit(method, held) {
 }
 
 /* ============================== ลงเวลา (ไปแทนสาขา) ============================== */
+let reliefPayMonth = 'this';   // 'this' | 'prev' — การ์ดเงินเดือนหัวหน้า
 async function renderClock(body) {
   body.innerHTML = `<div class="stack" id="clockBox"><div class="boot">กำลังโหลด…</div></div>`;
   const { data: offToday } = await supabase.from('day_offs').select('*').eq('off_date', TODAY).maybeSingle();
   const b = offToday ? BRANCHES.find(x => x.id === offToday.branch_id) : null;
   const cfg = getSettings();
 
-  // เงินเดือนหัวหน้าประมาณการเดือนนี้ (ใช้ทุกสาขา)
-  const dates = monthDates(TODAY);
+  // เงินเดือนหัวหน้า — เดือนนี้ (ประมาณการ) หรือเดือนก่อน (ปุ่มสลับ เจ้าของสั่ง 1 ต.ค. 69)
+  const isPrev = reliefPayMonth === 'prev';
+  const dates = monthDates(isPrev
+    ? (() => { const d = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 2, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01'; })()
+    : TODAY);
   const [{ data: allRecords }, { data: allClocks }, { data: whRentRows }, { data: myEmp }] = await Promise.all([
     supabase.from('daily_records').select('*').gte('record_date', dates[0]).lte('record_date', dates[dates.length - 1]),
     supabase.from('clock_records').select('*').gte('clock_date', dates[0]).lte('clock_date', dates[dates.length - 1]),
@@ -562,15 +566,20 @@ async function renderClock(body) {
   const whRentHistory = (whRentRows || []).map(r => ({ from: r.effective_from, rent: r.rent }));
   const whRent = calc.rentAt(whRentHistory, dates[0]);
   const pr = calc.payrollForRelief({
-    relief: { name: ME.name, base_salary: myEmp?.base_salary ?? 9000, delivery_pay: myEmp?.delivery_pay ?? 0 },
-    allBranchRecords: allRecords || [], allBranchClocksByDate, todayISO: TODAY, cfg, whRent,
+    relief: { name: ME.name, base_salary: myEmp?.base_salary ?? 9000, delivery_pay: myEmp?.delivery_pay ?? 0, start_date: myEmp?.start_date },
+    allBranchRecords: allRecords || [], allBranchClocksByDate, todayISO: TODAY, cfg, whRent, monthEnd: dates[dates.length - 1],
   });
 
-  const payCard = `<div class="card pad">
-      <div class="between" style="margin-bottom:2px"><div class="eyebrow">สรุปเงินเดือน (ประมาณการเดือนนี้)</div>
+  const payToggle = `<span class="seg2" style="align-self:flex-start">
+      <button data-rpaymonth="prev" aria-pressed="${isPrev}">เดือนก่อน</button>
+      <button data-rpaymonth="this" aria-pressed="${!isPrev}">เดือนนี้</button></span>`;
+  const payCard = pr.notStarted ? `${payToggle}<div class="card pad">
+      <div class="eyebrow">สรุปเงินเดือน ${monthLabel(dates[0])}</div>
+      <p class="sub" style="margin:8px 0 0">ยังไม่มีเงินเดือนเดือนนี้ — เริ่มงานวันที่ ${fmtDate(pr.startDate)}</p></div>` : `${payToggle}<div class="card pad">
+      <div class="between" style="margin-bottom:2px"><div class="eyebrow">${isPrev ? `สรุปเงินเดือน ${monthLabel(dates[0])}` : 'สรุปเงินเดือน (ประมาณการเดือนนี้)'}</div>
         <button class="mini" id="printReliefSlipBtn">ปริ้นสลิป</button></div>
       <div class="bigtime" style="margin:6px 0 2px">${baht(pr.total)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
-      <div class="sub" style="margin-bottom:10px">ยอดสุทธิโดยประมาณ · จ่ายจริงทุกวันที่ 5</div>
+      <div class="sub" style="margin-bottom:10px">${isPrev ? 'ยอดสุทธิของเดือนนี้ · จ่ายวันที่ 5 (ถ้าเจ้าของแก้ยอดย้อนหลัง ตัวเลขอาจเปลี่ยน)' : 'ยอดสุทธิโดยประมาณ · จ่ายจริงทุกวันที่ 5'}</div>
       <div class="payrows">
         <div class="payrow"><span>เงินเดือนฐาน</span><span class="n">${baht(myEmp?.base_salary ?? 0)}</span></div>
         <div class="payrow"><span>เงินส่งของ</span><span class="n">${baht(myEmp?.delivery_pay ?? 0)}</span></div>
@@ -580,11 +589,28 @@ async function renderClock(body) {
       <p class="sub" style="margin-top:8px">ไปทำแทนสาขาไม่หักมาสาย/ปิดไว — แต่ต้องลงเวลาเข้าก่อนถึงจะเริ่มงานได้</p>
     </div>`;
 
+  const wirePay = () => {
+    document.querySelectorAll('[data-rpaymonth]').forEach(btn => btn.addEventListener('click', () => {
+      if (reliefPayMonth === btn.dataset.rpaymonth) return;
+      reliefPayMonth = btn.dataset.rpaymonth; renderClock(body);
+    }));
+    const pb = $('#printReliefSlipBtn'); if (pb) pb.addEventListener('click', async () => {
+    const [companies, { data: mine }] = await Promise.all([
+      getCompanies(),
+      supabase.from('employee_private').select('*').eq('employee_id', ME.id).maybeSingle(),   // อ่านได้เฉพาะของตัวเอง
+    ]);
+    const html = reliefSlipHTML({ name: ME.name, role: 'หัวหน้า', first_name: ME.first_name, last_name: ME.last_name,
+      national_id: mine?.national_id || '', base_salary: myEmp?.base_salary ?? 0, delivery_pay: myEmp?.delivery_pay ?? 0 },
+      pr, monthLabel(dates[dates.length - 1]), companies);
+    printDoc(html, 'ยังไม่มีสลิปให้ออก');
+  });
+  };
   const box = $('#clockBox');
   if (!b) {
     box.innerHTML = `<div class="card pad clockcard"><div class="eyebrow">ลงเวลาทำงาน</div>
         <div class="sub" style="margin:6px 0 10px">วันนี้ไม่มีสาขาที่ต้องไปแทน</div>
         <button class="btn primary big" disabled>ลงเวลาเข้า</button></div>${payCard}`;
+    wirePay();
     return;
   }
   const [{ data: clockRow }, { data: recRow }, { data: prevRows }] = await Promise.all([
@@ -616,16 +642,7 @@ async function renderClock(body) {
 
   box.innerHTML = inner + payCard + `<p class="foot">วันที่ไปทำแทน หน้านี้เปิดฟอร์มปิดยอดของสาขานั้นให้กรอกได้เลย (ไม่ต้องนับสต๊อก) และแก้วที่ทำวันนั้นเข้าค่าแก้วของคุณ</p>`;
   wireClockTab(box, b, clock, rec, prev, openSet);
-  const pb = $('#printReliefSlipBtn'); if (pb) pb.addEventListener('click', async () => {
-    const [companies, { data: mine }] = await Promise.all([
-      getCompanies(),
-      supabase.from('employee_private').select('*').eq('employee_id', ME.id).maybeSingle(),   // อ่านได้เฉพาะของตัวเอง
-    ]);
-    const html = reliefSlipHTML({ name: ME.name, role: 'หัวหน้า', first_name: ME.first_name, last_name: ME.last_name,
-      national_id: mine?.national_id || '', base_salary: myEmp?.base_salary ?? 0, delivery_pay: myEmp?.delivery_pay ?? 0 },
-      pr, monthLabel(dates[dates.length - 1]), companies);
-    printDoc(html, 'ยังไม่มีสลิปให้ออก');
-  });
+  wirePay();
 }
 
 function reliefOpenCountCard(b, prev) {
