@@ -975,16 +975,15 @@ async function renderPL(body) {
   const allExternal = (externalSales || []).filter(s => s.sale_date >= dates[0] && s.sale_date <= dates[dates.length - 1]).map(s => ({ items: s.items }));
   const wh = calc.warehousePL({ deliveries: allDeliveries, externalSales: allExternal, stockItemsById, avgCostById, reliefPayroll: prR });   // ยอดส่งของก่อนใช้แอปนับเฉพาะฝั่งสาขา ไม่นับเป็นยอดคลังกลาง (เจ้าของสั่ง 1 ต.ค. 69)
   const companyNet = totNet + wh.net;
-  const whEmpty = !wh.sales && !wh.cost && !wh.headLabor;   // เดือนที่คลังกลางไม่มีความเคลื่อนไหว (เช่น ก.ย. 69 ก่อนใช้แอป) ไม่ต้องแสดงแถว
  
   const tbRows = rows.map(({ b, x }) => `<tr><td>${esc(b.name)}</td>
       <td class="n">${baht(x.sales)}</td><td class="n">${baht(x.materialCost)}</td><td class="n">${(x.materialRate * 100).toFixed(1)}%</td>
       <td class="n">${baht(x.labor)}</td><td class="n">${baht(x.rent)}</td><td class="n">${x.repairs ? baht(x.repairs) : '–'}</td>
       <td class="n">${x.grabCommission ? baht(x.grabCommission) : '–'}</td>
       <td class="n ${x.net < 0 ? 'neg' : 'gain'}" style="font-weight:700">${signed(x.net)}</td></tr>`).join('')
-    + (whEmpty ? '' : `<tr><td>คลังกลาง</td><td class="n">${baht(wh.sales)}</td><td class="n">${baht(wh.cost)}</td><td class="n">0.0%</td>
+    + `<tr><td>คลังกลาง</td><td class="n">${baht(wh.sales)}</td><td class="n">${baht(wh.cost)}</td><td class="n">0.0%</td>
       <td class="n">${baht(wh.headLabor)}</td><td class="n">–</td><td class="n">–</td><td class="n">–</td>
-      <td class="n ${wh.net < 0 ? 'neg' : 'gain'}" style="font-weight:700">${signed(wh.net)}</td></tr>`);
+      <td class="n ${wh.net < 0 ? 'neg' : 'gain'}" style="font-weight:700">${signed(wh.net)}</td></tr>`;
  
   const purchRows = (purchases || []).map(p => {
     const it = STOCK_ITEMS.find(x => x.id === p.item_id);
