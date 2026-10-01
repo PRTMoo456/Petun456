@@ -735,6 +735,17 @@ if (ownerHTML.pay && ownerHTML.pl) {
     await new Promise(r => setTimeout(r, 160));
     check('หัวข้อเงินเดือนเปลี่ยนเป็นเดือนที่เลือก', document.getElementById('ownBody').innerHTML.includes(`เงินเดือน — ${prevLabel}`), 'หัวข้อไม่เปลี่ยน');
   }
+  {
+    const html = document.getElementById('ownBody').innerHTML;
+    const ths = [...document.querySelectorAll('#ownBody th')].map(x => x.textContent);
+    const want = ['วันที่', 'เหล่านาดี', 'บ้านหว้า', 'เขาสวนกวาง', 'บัณฑิต', 'หนองหลุบ', 'คนแทน'];
+    const i0 = ths.indexOf('วันที่');
+    check('เงินเดือนมีหัวข้อเวลาเข้าออกงาน', html.includes(`เวลาเข้าออกงาน — ${prevLabel}`), 'ไม่พบหัวข้อ');
+    const exp = want.filter(w => w === 'วันที่' || w === 'คนแทน' || db.branches.some(b => b.name === w));
+    check('คอลัมน์ตารางเวลาเรียงตามที่สั่ง', i0 >= 0 && exp.every((w, k) => ths[i0 + k] === w), ths.slice(i0, i0 + exp.length).join(','));
+    const lastDay = util.monthDates(prevMk + '-01').slice(-1)[0];
+    check('ตารางเวลามีครบทั้งเดือน', html.includes(util.fmtDate(lastDay)) && html.includes(util.fmtDate(prevMk + '-01')), 'วันไม่ครบ');
+  }
   document.querySelector('[data-otab="pl"]').click();
   await new Promise(r => setTimeout(r, 160));
   check('กำไรขาดทุนจำเดือนที่เลือกไว้', document.getElementById('ownBody').innerHTML.includes(`กำไร/ขาดทุน — ${prevLabel}`), 'ไม่ได้ใช้เดือนที่เลือก');

@@ -57,6 +57,39 @@ function selectOwnerTab(tab) {
   return loadTab();
 }
  
+/* ตารางเวลาเข้าออกงานทั้งเดือน (แท็บเงินเดือน — เจ้าของสั่ง 1 ต.ค. 69)
+   แถว = วันที่ · คอลัมน์ = สาขาเรียงตามที่เจ้าของกำหนด + "คนแทน" · ช่องละ "เวลาเข้า : เวลาออก"
+   วันที่หัวหน้าไปทำแทน เวลาไปอยู่คอลัมน์คนแทน (พร้อมชื่อสาขา) ส่วนช่องสาขานั้นขึ้นว่ามีคนแทน */
+const TIME_TABLE_ORDER = ['lnd', 'bwa', 'ksk', 'bdt', 'nlb'];
+function clockTableHTML({ dates, clocksByBranch, records, dayOffs, reliefName }) {
+  const hm = t => t ? String(t).slice(0, 5) : '–';
+  const order = [...TIME_TABLE_ORDER.map(id => BRANCHES.find(b => b.id === id)).filter(Boolean),
+    ...BRANCHES.filter(b => !TIME_TABLE_ORDER.includes(b.id))];
+  const offSet = new Set(dayOffs.map(d => d.branch_id + '|' + d.off_date));
+  const closedSet = new Set(records.filter(r => r.store_closed).map(r => r.branch_id + '|' + r.record_date));
+  const cell = c => `${hm(c.time_in)} : ${c.time_out ? hm(c.time_out) : '<span class="sub">ยังไม่ออก</span>'}`
+    + `${N(c.late_minutes) ? `<div class="sub" style="color:var(--bad)">สาย ${N(c.late_minutes)} น.</div>` : ''}`
+    + `${N(c.early_minutes) ? `<div class="sub" style="color:var(--bad)">ปิดไว ${N(c.early_minutes)} น.</div>` : ''}`;
+  const isRelief = c => reliefName && c.staff_name === reliefName;
+  const rows = dates.filter(d => d <= TODAY).map(d => {
+    const tds = order.map(b => {
+      const c = clocksByBranch[b.id]?.[d];
+      if (c && !isRelief(c)) return `<td class="n" style="white-space:nowrap">${cell(c)}</td>`;
+      if (c && isRelief(c)) return `<td class="n sub">คนแทน</td>`;
+      if (offSet.has(b.id + '|' + d)) return `<td class="n sub">หยุด</td>`;
+      if (closedSet.has(b.id + '|' + d)) return `<td class="n sub">ปิดร้าน</td>`;
+      return `<td class="n sub">–</td>`;
+    }).join('');
+    const rel = order.map(b => ({ b, c: clocksByBranch[b.id]?.[d] })).filter(x => x.c && isRelief(x.c));
+    const relTd = rel.length ? rel.map(x => `${cell(x.c)}<div class="sub">${esc(x.b.name)}</div>`).join('') : '<span class="sub">–</span>';
+    return `<tr><td style="white-space:nowrap">${fmtDate(d)}</td>${tds}<td class="n" style="white-space:nowrap">${relTd}</td></tr>`;
+  }).reverse().join('');
+  return `<div class="tablewrap"><table>
+    <thead><tr><th>วันที่</th>${order.map(b => `<th>${esc(b.name)}</th>`).join('')}<th>คนแทน</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="${order.length + 2}" class="sub">ยังไม่มีข้อมูลเดือนนี้</td></tr>`}</tbody></table></div>
+    <p class="foot">แต่ละช่อง = เวลาเข้างาน : เวลาออกงาน · "หยุด" = วันหยุดที่จองไว้ · "คนแทน" = หัวหน้าไปทำแทน (เวลาอยู่คอลัมน์คนแทน)</p>`;
+}
+
 /* เดือนที่เลือกดู (เงินเดือน · กำไร/ขาดทุน · ปริ้นสรุปส่งของทั้งเดือน) — ค่าเริ่มต้นคือเดือนปัจจุบัน
    ดูย้อนหลังได้ 12 เดือน (เจ้าของสั่ง 1 ต.ค. 69 — ต้นเดือนต้องดูยอด/จ่ายเงินเดือนของเดือนที่แล้ว) */
 const selMonth = () => S.month || TODAY.slice(0, 7);
@@ -784,12 +817,14 @@ async function loadMonthPayroll() {
  
 async function renderPay(body) {
   body.innerHTML = `<div class="boot">กำลังคำนวณ…</div>`;
-  const [{ relief, payPeople, prR }, { data: allRemits }, { data: headRemits }, { data: cashRecords }] = await Promise.all([
+  const [{ relief, payPeople, prR, dates: payDates, clocksByDateAll: payClocks, allRecords: payRecords }, { data: allRemits }, { data: headRemits }, { data: cashRecords }, { data: monthDayOffs }] = await Promise.all([
     loadMonthPayroll(),
     supabase.from('cash_remittances').select('*'),
     supabase.from('head_remittances').select('*'),
     supabase.from('daily_records').select('branch_id,record_date,cash,float_cash,sent').eq('sent', true),
+    supabase.from('day_offs').select('off_date,branch_id').gte('off_date', selDates()[0]).lte('off_date', selDates().slice(-1)[0]),
   ]);
+  const timeHTML = clockTableHTML({ dates: payDates, clocksByBranch: payClocks, records: payRecords, dayOffs: monthDayOffs || [], reliefName: relief?.name });
   const staffRows = payPeople.map(p => `<tr><td>${esc(p.name)} <span class="sub">${esc(p.place)}</span></td>
       <td class="n">${baht(p.base)}</td>
       <td class="n ${p.pr.reset ? 'neg' : ''}">${baht(p.pr.diligence)}${p.pr.reset ? ' ⚠' : ''}</td>
@@ -844,6 +879,9 @@ async function renderPay(body) {
     <div class="card pad" style="margin-top:16px"><div class="between"><span class="eyebrow">รวมเงินเดือนที่ต้องจ่าย</span>
       <span class="bigtime" style="font-size:22px">${baht(salaryTotal)} บาท</span></div></div>
  
+    <h3 style="margin:22px 0 10px">เวลาเข้าออกงาน — ${monthLabel(selMonth() + '-01')}</h3>
+    ${timeHTML}
+
     <h3 style="margin:22px 0 10px">เงินสดค้างที่สาขา</h3>
     <div class="tablewrap"><table><thead><tr><th>สาขา</th><th>ค้างส่ง</th><th>ค้างกี่วัน</th><th>ส่ง/รับล่าสุด</th></tr></thead><tbody>${cashRows}</tbody></table></div>
  
