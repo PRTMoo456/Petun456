@@ -515,6 +515,26 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log('✓ ส่งทีละ — โซดาต่ำกว่า 10 ขวด จัดไป 12 ขวด · รายการอื่นส่งตามที่ขาดพอดี');
 }
 
+// 4.17.8 ทำงานวันหยุดคิดอัตโนมัติ (แบบ ก — เจ้าของยืนยัน 1 ต.ค. 69): โควตาวันหยุดที่ไม่ได้หยุด = ทำงานวันหยุด
+{
+  const util = await import('../src/util.js');
+  const d = new Date(+TODAY.slice(0, 4), +TODAY.slice(5, 7) - 2, 1);
+  const prevDates = util.monthDates(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01');
+  const pay = (offCount, dates, quota = 2) => {
+    const o = {}; dates.slice(offCount).forEach(x => { o[x] = { staff_name: 'ท', clock_date: x, time_in: '08:00', time_out: '18:00', late_minutes: 0, early_minutes: 0 }; });
+    return calc.payrollFor({ branch: { staff_name: 'ท', base_salary: 9000, days_off_quota: quota, holiday_work_days: 0 },
+      records: [], clocksByDate: o, allDatesInMonth: dates, todayISO: TODAY, cfg });
+  };
+  const p0 = pay(0, prevDates), p1 = pay(1, prevDates), p2 = pay(2, prevDates), p4 = pay(0, prevDates, 4);
+  check('ไม่หยุดเลย โควตา 2 → ทำงานวันหยุด 2 ครั้ง 850', p0.holidays === 2 && p0.holidayPay === 850, `${p0.holidays} ครั้ง ${p0.holidayPay}`);
+  check('หยุด 1 จาก 2 → 1 ครั้ง 400', p1.holidays === 1 && p1.holidayPay === 400, `${p1.holidays} ครั้ง ${p1.holidayPay}`);
+  check('หยุดครบโควตา → ไม่มีค่าทำงานวันหยุด', p2.holidays === 0 && p2.holidayPay === 0, `${p2.holidays} ครั้ง`);
+  check('โควตา 4 ไม่หยุดเลย → 1,900', p4.holidayPay === 1900, `${p4.holidayPay}`);
+  const cur = pay(0, util.monthDates(TODAY));
+  check('เดือนนี้ยังไม่จบ ยังไม่คิดค่าทำงานวันหยุด', cur.holidayPay === 0, `${cur.holidayPay}`);
+  console.log('✓ ทำงานวันหยุด — นับจากโควตาที่ไม่ได้หยุด คิดตอนเดือนจบ 400/450/500/550');
+}
+
 // 4.18 ค่าปรับลืมลงเวลา — ยกเลิกแล้ว (1 ต.ค. 69)
 {
   const mk = clockRows => {

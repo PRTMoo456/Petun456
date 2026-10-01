@@ -378,7 +378,8 @@ async function loadMeTab(ctx) {
       <div class="payrows">
         <div class="payrow"><span>เงินเดือนฐาน</span><span class="n">${baht(N(ME.base_salary))}</span></div>
         <div class="payrow"><span>เบี้ยขยัน${pr.reset ? ' <span class="sub" style="color:var(--bad)">— โดนรีเซ็ตเดือนนี้</span>' : ''}</span><span class="n">${baht(pr.diligence)}</span></div>
-        ${pr.holidayPay ? `<div class="payrow"><span>ค่าทำงานวันหยุด</span><span class="n">${baht(pr.holidayPay)}</span></div>` : ''}
+        ${pr.holidayPay ? `<div class="payrow"><span>ค่าทำงานวันหยุด (${pr.holidays} ครั้ง)</span><span class="n">${baht(pr.holidayPay)}</span></div>`
+          : pr.holidayPending ? `<div class="payrow"><span>ค่าทำงานวันหยุด <span class="sub">— ยังเหลือวันหยุด ${pr.unusedDaysOff} วัน คิดให้ตอนสิ้นเดือน</span></span><span class="n">–</span></div>` : ''}
         <div class="payrow"><span>ค่าแก้ว (${pr.cups} ใบ)</span><span class="n">${baht(pr.cupPay)}</span></div>
         <div class="payrow"><span>ใช้โควตาวันหยุด</span><span class="n">${pr.daysOffTaken} / ${BRANCH.days_off_quota} วัน</span></div>
         ${pr.deduct ? `<div class="payrow neg"><span>หัก สาย ${pr.late} น. / ปิดไว ${pr.early} น.${pr.excess ? ` / หยุดเกิน ${pr.excess} วัน` : ''}</span><span class="n">−${baht(pr.deduct)}</span></div>` : ''}

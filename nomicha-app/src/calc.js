@@ -105,13 +105,18 @@ export function payrollFor({ branch, records, clocksByDate, allDatesInMonth, tod
   const reset = (late + early) > cfg.diligenceRules.lateAllowance || excess > 0;
   const dilBase = Math.min(cfg.diligenceRules.cap, cfg.diligenceRules.step * 3);
   const diligence = reset ? 0 : dilBase;
-  const holidays = branch.holiday_work_days || 0;
+  // ทำงานวันหยุด (เจ้าของยืนยัน 1 ต.ค. 69 — "แบบ ก"): วันหยุดตามโควตาที่ไม่ได้หยุด = มาทำงานวันหยุด
+  // นับครั้งที่ 1,2,3,4 จ่ายตามอัตรา 400/450/500/550 · คิดเมื่อเดือนจบแล้วเท่านั้น (ระหว่างเดือนยังหยุดเพิ่มได้)
+  const monthDone = allDatesInMonth.length > 0 && allDatesInMonth[allDatesInMonth.length - 1] < todayISO;
+  const unusedDaysOff = Math.max(0, branch.days_off_quota - daysOffTaken);
+  const holidays = monthDone ? Math.min(unusedDaysOff, cfg.holidayPayScale.length) : 0;
+  const holidayPending = !monthDone && unusedDaysOff > 0;
   const holidayPay = holidays ? cfg.holidayPayScale.slice(0, holidays).reduce((a, c) => a + c, 0) : 0;
   const R = cfg.payRules;
   const cupPay = cups * R.cupPay;
   const deduct = late * R.latePerMin + early * R.earlyPerMin + excess * R.excessDayOff;
   const total = branch.base_salary + diligence + holidayPay + cupPay - deduct;
-  return { cups, late, early, daysOffTaken, excess, reset, diligence, holidayPay, cupPay, deduct, total };
+  return { cups, late, early, daysOffTaken, excess, reset, diligence, holidays, holidayPending, unusedDaysOff, holidayPay, cupPay, deduct, total };
 }
 
 /* พอร์ตจาก payrollForRelief() — เงินเดือนหัวหน้า (ไม่ผูกสาขาเดียว วนดูทุกสาขาที่ไปแทน)

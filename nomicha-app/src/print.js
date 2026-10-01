@@ -100,7 +100,7 @@ export function staffSlipHTML(branch, pr, monthLabelStr, companies) {
     <div class="slip-row"><span>สาขา</span><span>${esc(branch.name)}</span></div>`,
     [['เงินเดือนฐาน', branch.base_salary],
      [`เบี้ยขยัน${pr.reset ? ' (โดนรีเซ็ตเดือนนี้)' : ''}`, pr.diligence],
-     pr.holidayPay && [`ค่าทำงานวันหยุด (${branch.holiday_work_days || 0} วัน)`, pr.holidayPay],
+     pr.holidayPay && [`ค่าทำงานวันหยุด (${pr.holidays || 0} ครั้ง)`, pr.holidayPay],
      [`ค่าแก้ว (${pr.cups} ใบ)`, pr.cupPay],
      pr.deduct && ['หัก สาย/ปิดไว/หยุดเกินโควตา', pr.deduct, true]],
     pr.total, monthLabelStr);

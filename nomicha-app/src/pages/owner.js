@@ -828,7 +828,7 @@ async function renderPay(body) {
   const staffRows = payPeople.map(p => `<tr><td>${esc(p.name)} <span class="sub">${esc(p.place)}</span></td>
       <td class="n">${baht(p.base)}</td>
       <td class="n ${p.pr.reset ? 'neg' : ''}">${baht(p.pr.diligence)}${p.pr.reset ? ' ⚠' : ''}</td>
-      <td class="n">${baht(p.pr.holidayPay)}</td>
+      <td class="n" title="${p.pr.holidays ? `ทำงานวันหยุด ${p.pr.holidays} ครั้ง` : p.pr.holidayPending ? `ยังเหลือวันหยุด ${p.pr.unusedDaysOff} วัน — คิดตอนสิ้นเดือน` : ''}">${p.pr.holidayPending ? '<span class="sub">สิ้นเดือน</span>' : baht(p.pr.holidayPay) + (p.pr.holidays ? ` <span class="sub">(${p.pr.holidays})</span>` : '')}</td>
       <td class="n" title="${p.pr.cups} แก้ว">${baht(p.pr.cupPay)}</td>
       <td class="n ${p.pr.deduct ? 'neg' : ''}" title="${[p.pr.daysOffTaken ? `ใช้วันหยุด ${p.pr.daysOffTaken}/${p.b.days_off_quota} วัน` : '', p.pr.late ? `สาย ${p.pr.late} นาที` : '', p.pr.early ? `ปิดไว ${p.pr.early} นาที` : '', p.pr.excess ? `หยุดเกินโควตา ${p.pr.excess} วัน` : ''].filter(Boolean).join(' · ') || 'ไม่มีรายการหัก'}">${p.pr.deduct ? '−' + baht(p.pr.deduct) : '0'}</td>
       <td class="n" style="font-weight:600">${baht(p.pr.total)}</td></tr>`).join('');
@@ -870,7 +870,7 @@ async function renderPay(body) {
  
   body.innerHTML = `<div class="between" style="margin-bottom:14px;flex-wrap:wrap;gap:8px"><h3 style="margin:0">เงินเดือน — ${monthLabel(selMonth() + '-01')}</h3>
       <span class="row" style="gap:8px">${monthPickerHTML('payMonthSel')}<button class="mini" id="printAllSlipsBtn">ส่งออกสลิปทุกคน</button></span></div>
-    ${isThisMonth() ? '' : '<p class="sub" style="margin:-6px 0 10px">ดูย้อนหลัง — ฐานเงินเดือน/วันทำงานวันหยุด/เงินส่งของ ใช้ค่าที่ตั้งอยู่ตอนนี้</p>'}
+    ${isThisMonth() ? '' : '<p class="sub" style="margin:-6px 0 10px">ดูย้อนหลัง — ฐานเงินเดือน/โควตาวันหยุด/เงินส่งของ ใช้ค่าที่ตั้งอยู่ตอนนี้</p>'}
     <div class="tablewrap"><table>
       <thead><tr><th>พนักงาน</th><th>ฐานเงินเดือน</th><th>เบี้ยขยัน</th><th>ทำงานวันหยุด</th><th>ค่าแก้ว</th><th>หัก (ขาด/ลา/มาสาย)</th><th>เงินเดือนสุทธิ</th></tr></thead>
       <tbody>${staffRows}${reliefRow}</tbody></table></div>
