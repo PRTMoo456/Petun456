@@ -326,3 +326,10 @@ body{background:var(--paper)}
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40}
 .topbar .who{font-size:13px;color:var(--muted)}
 .topbar button{border:1px solid var(--line-2);background:var(--surface);color:var(--muted);border-radius:8px;padding:6px 12px;font-size:12.5px}
+
+/* กำไร/ขาดทุน: รายรับสีเขียว รายการที่ลบออกสีแดง (เจ้าของสั่ง 1 ต.ค. 69) */
+.pltable td:nth-child(2),.pltable th:nth-child(2){color:var(--ok)}
+.pltable td:nth-child(3),.pltable td:nth-child(5),.pltable td:nth-child(6),.pltable td:nth-child(7),.pltable td:nth-child(8),
+.pltable th:nth-child(3),.pltable th:nth-child(5),.pltable th:nth-child(6),.pltable th:nth-child(7),.pltable th:nth-child(8){color:var(--bad)}
+.pltable td.gain{color:var(--ok);font-weight:700}
+.kpi.inc .v{color:var(--ok)} .kpi.out .v{color:var(--bad)}

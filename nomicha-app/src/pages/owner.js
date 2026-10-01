@@ -975,10 +975,10 @@ async function renderPL(body) {
       <td class="n">${baht(x.sales)}</td><td class="n">${baht(x.materialCost)}</td><td class="n">${(x.materialRate * 100).toFixed(1)}%</td>
       <td class="n">${baht(x.labor)}</td><td class="n">${baht(x.rent)}</td><td class="n">${x.repairs ? baht(x.repairs) : '–'}</td>
       <td class="n">${x.grabCommission ? baht(x.grabCommission) : '–'}</td>
-      <td class="n ${x.net < 0 ? 'neg' : ''}" style="font-weight:700">${signed(x.net)}</td></tr>`).join('')
+      <td class="n ${x.net < 0 ? 'neg' : 'gain'}" style="font-weight:700">${signed(x.net)}</td></tr>`).join('')
     + `<tr><td>คลังกลาง</td><td class="n">${baht(wh.sales)}</td><td class="n">${baht(wh.cost)}</td><td class="n">0.0%</td>
       <td class="n">${baht(wh.headLabor)}</td><td class="n">–</td><td class="n">–</td><td class="n">–</td>
-      <td class="n ${wh.net < 0 ? 'neg' : ''}" style="font-weight:700">${signed(wh.net)}</td></tr>`;
+      <td class="n ${wh.net < 0 ? 'neg' : 'gain'}" style="font-weight:700">${signed(wh.net)}</td></tr>`;
  
   const purchRows = (purchases || []).map(p => {
     const it = STOCK_ITEMS.find(x => x.id === p.item_id);
@@ -1030,18 +1030,18 @@ async function renderPL(body) {
   body.innerHTML = `
     <div class="between" style="margin:0 0 14px;flex-wrap:wrap;gap:8px"><h3 style="margin:0">กำไร/ขาดทุน — ${monthLabel(selMonth() + '-01')}</h3>${monthPickerHTML('plMonthSel')}</div>
     <div class="kpis">
-      <div class="card kpi"><div class="eyebrow">ยอดขายรวม ${BRANCHES.length} สาขา</div><div class="v">${baht(totSales)}</div></div>
-      <div class="card kpi"><div class="eyebrow">ต้นทุนวัตถุดิบรวม</div><div class="v">${baht(totMat)}</div></div>
-      <div class="card kpi"><div class="eyebrow">ค่าแรงรวมทั้งบริษัท</div><div class="v">${baht(totLabor + wh.headLabor)}</div></div>
-      <div class="card kpi"><div class="eyebrow">ค่าคอมแกร๊บรวม</div><div class="v">${baht(totGrabComm)}</div></div>
-      <div class="card kpi ${companyNet < 0 ? 'flag' : ''}"><div class="eyebrow">กำไร/ขาดทุนรวมบริษัท</div><div class="v">${signed(companyNet)}</div></div>
+      <div class="card kpi inc"><div class="eyebrow">ยอดขายรวม ${BRANCHES.length} สาขา</div><div class="v">${baht(totSales)}</div></div>
+      <div class="card kpi out"><div class="eyebrow">ต้นทุนวัตถุดิบรวม</div><div class="v">${baht(totMat)}</div></div>
+      <div class="card kpi out"><div class="eyebrow">ค่าแรงรวมทั้งบริษัท</div><div class="v">${baht(totLabor + wh.headLabor)}</div></div>
+      <div class="card kpi out"><div class="eyebrow">ค่าคอมแกร๊บรวม</div><div class="v">${baht(totGrabComm)}</div></div>
+      <div class="card kpi ${companyNet < 0 ? 'flag out' : 'inc'}"><div class="eyebrow">กำไร/ขาดทุนรวมบริษัท</div><div class="v">${signed(companyNet)}</div></div>
     </div>
-    <div class="tablewrap"><table>
+    <div class="tablewrap"><table class="pltable">
       <thead><tr><th>สาขา</th><th>ยอดขาย</th><th>ต้นทุนวัตถุดิบ</th><th>อัตราการใช้วัตถุดิบ</th><th>ค่าแรง</th><th>ค่าเช่า</th><th>ค่าซ่อม</th><th>ค่าคอมแกร๊บ</th><th>กำไร/ขาดทุน</th></tr></thead>
       <tbody>${tbRows}</tbody>
       <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td>รวม</td><td class="n">${baht(totSales + wh.sales)}</td><td class="n">${baht(totMat + wh.cost)}</td>
         <td class="n">${(totRate * 100).toFixed(1)}%</td><td class="n">${baht(totLabor + wh.headLabor)}</td><td class="n">${baht(totRent)}</td>
-        <td class="n">${baht(totRepair)}</td><td class="n">${baht(totGrabComm)}</td><td class="n ${companyNet < 0 ? 'neg' : ''}">${signed(companyNet)}</td></tr></tfoot></table></div>
+        <td class="n">${baht(totRepair)}</td><td class="n">${baht(totGrabComm)}</td><td class="n ${companyNet < 0 ? 'neg' : 'gain'}">${signed(companyNet)}</td></tr></tfoot></table></div>
     <p class="foot">"อัตราการใช้วัตถุดิบ" = ต้นทุนวัตถุดิบ ÷ ยอดขาย · ค่าคอมแกร๊บใช้อัตราที่บันทึกไว้ของแต่ละวัน ·
       แถวคลังกลาง: ยอดขาย = ของที่ส่งออกทั้งหมด×ราคาส่งสาขา, ต้นทุน = ของเดียวกัน×ต้นทุนเฉลี่ยจริง, ค่าแรง = เงินเดือนหัวหน้าเต็มจำนวน (รวมค่าเช่าคลังกลางแล้ว)</p>
  
