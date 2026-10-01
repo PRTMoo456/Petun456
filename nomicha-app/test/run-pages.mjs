@@ -813,18 +813,16 @@ if (ownerHTML.pay && ownerHTML.pl) {
     check('สรุปยอดสาขาแสดงครบทั้งเดือนที่แล้ว', html.includes(util.fmtDate(last[0])) && html.includes(util.fmtDate(last[last.length - 1])) && !html.includes(util.fmtDate(TODAY)),
       'ไม่ครบวันที่ 1 ถึงสิ้นเดือน หรือมีวันนี้ปนมา');
   }
-  // ต้นทุนวัตถุดิบส่งนอกแอป — เพิ่มยอดแล้วต้นทุนวัตถุดิบของสาขาเพิ่มตาม
+  // ยอดส่งของก่อนใช้แอป (ใส่ผ่าน SQL ครั้งเดียว) ต้องบวกเข้าต้นทุนวัตถุดิบสาขา — ไม่มีปุ่มแก้ในหน้าจอ
   document.querySelector('[data-otab="pl"]').click(); await new Promise(r => setTimeout(r, 200));
   const matOf = () => { const tr = [...document.querySelectorAll('.pltable tbody tr')].find(t => t.cells[0].textContent === 'เหล่านาดี'); return tr ? Number(tr.cells[2].textContent.replace(/,/g, '')) : NaN; };
   const m0 = matOf();
-  document.getElementById('mdToggleBtn').click(); await new Promise(r => setTimeout(r, 160));
-  document.getElementById('mdBranch').value = 'lnd';
-  document.getElementById('mdDate').value = prevMk + '-15';
-  document.getElementById('mdAmount').value = '3,500';
-  document.getElementById('mdSubmitBtn').click(); await new Promise(r => setTimeout(r, 220));
-  check('บันทึกต้นทุนนอกแอปแล้วต้นทุนวัตถุดิบสาขาเพิ่ม', db.manual_deliveries.length === 1 && matOf() === m0 + 3500, `ก่อน ${m0} หลัง ${matOf()}`);
-  const del = document.querySelector('[data-mddel]'); del.click(); del.click(); await new Promise(r => setTimeout(r, 200));
-  check('ลบต้นทุนนอกแอปได้ (กด 2 ครั้ง)', db.manual_deliveries.length === 0 && matOf() === m0, `เหลือ ${db.manual_deliveries.length}`);
+  db.manual_deliveries.push({ id: 'md1', branch_id: 'lnd', delivery_date: prevMk + '-15', amount: 3500 });
+  document.querySelector('[data-otab="pay"]').click(); await new Promise(r => setTimeout(r, 160));
+  document.querySelector('[data-otab="pl"]').click(); await new Promise(r => setTimeout(r, 200));
+  check('ยอดส่งของก่อนใช้แอปบวกเข้าต้นทุนวัตถุดิบ', matOf() === m0 + 3500, `ก่อน ${m0} หลัง ${matOf()}`);
+  check('ไม่มีปุ่มเพิ่ม/ลบยอดในหน้าจอ', !document.getElementById('mdToggleBtn') && !document.querySelector('[data-mddel]'), 'ยังมีปุ่ม');
+  db.manual_deliveries.length = 0;
   console.log('✓ เลือกเดือนย้อนหลัง — เงินเดือนและกำไร/ขาดทุนเปลี่ยนตามเดือนที่เลือก');
 }
 

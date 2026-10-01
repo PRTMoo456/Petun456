@@ -1047,6 +1047,7 @@ async function renderPL(body) {
       <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td>รวม</td><td class="n">${baht(totSales + wh.sales)}</td><td class="n">${baht(totMat + wh.cost)}</td>
         <td class="n">${(totRate * 100).toFixed(1)}%</td><td class="n">${baht(totLabor + wh.headLabor)}</td><td class="n">${baht(totRent)}</td>
         <td class="n">${baht(totRepair)}</td><td class="n">${baht(totGrabComm)}</td><td class="n ${companyNet < 0 ? 'neg' : 'gain'}">${signed(companyNet)}</td></tr></tfoot></table></div>
+    ${manualDlv.length ? `<p class="foot">ต้นทุนวัตถุดิบเดือนนี้รวมยอดส่งของก่อนเริ่มใช้แอป ${baht(manualDlv.reduce((t, m) => t + N(m.amount), 0))} บาท (${[...new Set(manualDlv.map(m => (BRANCHES.find(b => b.id === m.branch_id) || {}).name || m.branch_id))].join(' · ')})</p>` : ''}
     <p class="foot">"อัตราการใช้วัตถุดิบ" = ต้นทุนวัตถุดิบ ÷ ยอดขาย · ค่าคอมแกร๊บใช้อัตราที่บันทึกไว้ของแต่ละวัน ·
       แถวคลังกลาง: ยอดขาย = ของที่ส่งออกทั้งหมด×ราคาส่งสาขา, ต้นทุน = ของเดียวกัน×ต้นทุนเฉลี่ยจริง, ค่าแรง = เงินเดือนหัวหน้าเต็มจำนวน (รวมค่าเช่าคลังกลางแล้ว)</p>
  
@@ -1085,26 +1086,6 @@ async function renderPL(body) {
       <tbody>${purchRows || '<tr><td colspan="7" class="sub">ยังไม่มีบิล</td></tr>'}</tbody></table></div>
     <p class="foot" style="margin-bottom:16px">เมื่อเพิ่มบิล ระบบจะเพิ่มสต๊อกและคำนวณต้นทุนเฉลี่ยใหม่ทันที · เจ้าของแก้วันที่ จำนวน และราคาได้จากปุ่ม <b>แก้ไข</b></p>
  
-    <h3 style="margin:22px 0 10px">ต้นทุนวัตถุดิบส่งนอกแอป — ${monthLabel(selMonth() + '-01')}</h3>
-    <div class="card pad" style="margin-bottom:10px">
-      <div class="between" style="margin-bottom:4px"><div class="eyebrow">รอบส่งของที่ไม่ได้จัดผ่านแอป</div>
-        <button class="mini" id="mdToggleBtn">${S.mdOpen ? 'ปิด' : '+ เพิ่มยอด'}</button></div>
-      ${manualErr ? '<p class="sub" style="margin:4px 0 0">ยังใช้ไม่ได้ — ต้องรันไฟล์อัปเดตฐานข้อมูล 016 ก่อน</p>' : S.mdOpen ? `
-        <div class="row" style="gap:10px;align-items:end;flex-wrap:wrap">
-          <div class="field" style="margin:0"><label>สาขา</label><select id="mdBranch" class="ctl">${BRANCHES.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
-          <div class="field" style="margin:0"><label>วันที่ส่ง</label><input type="date" id="mdDate" value="${isThisMonth() ? TODAY : dates[dates.length - 1]}" min="${dates[0]}" max="${dates[dates.length - 1]}"></div>
-          <div class="field" style="margin:0"><label>ยอดตามราคาส่งสาขา (บาท)</label><input id="mdAmount" inputmode="decimal" style="width:140px"></div>
-          <div class="field" style="margin:0"><label>หมายเหตุ</label><input id="mdNote" placeholder="เช่น รอบจันทร์" style="width:140px"></div>
-          <button class="btn primary" id="mdSubmitBtn">บันทึก</button>
-        </div>` : ''}
-    </div>
-    <div class="tablewrap" style="margin-bottom:6px"><table><thead><tr><th>วันที่</th><th>สาขา</th><th>ยอด</th><th>หมายเหตุ</th><th></th></tr></thead>
-      <tbody>${manualDlv.map(m => `<tr><td>${fmtDate(m.delivery_date)}</td><td>${esc((BRANCHES.find(b => b.id === m.branch_id) || {}).name || m.branch_id)}</td>
-        <td class="n">${baht(m.amount)}</td><td class="sub">${esc(m.note || '')}</td><td class="n"><button class="mini" data-mddel="${m.id}">ลบ</button></td></tr>`).join('')
-        || '<tr><td colspan="5" class="sub">ยังไม่มีรายการเดือนนี้</td></tr>'}</tbody>
-      ${manualDlv.length ? `<tfoot><tr style="font-weight:700"><td colspan="2">รวม</td><td class="n">${baht(manualDlv.reduce((t, m) => t + N(m.amount), 0))}</td><td colspan="2"></td></tr></tfoot>` : ''}</table></div>
-    <p class="foot" style="margin-bottom:16px">ยอดนี้บวกเข้า "ต้นทุนวัตถุดิบ" ของสาขาในตารางด้านบน และนับเป็นยอดขายคลังกลาง (ต้นทุนคลัง = ยอด × 90%) · ไม่ตัดสต๊อกคลังกลาง</p>
-
     <h3 style="margin:22px 0 10px">ค่าซ่อม/บำรุงรักษา</h3>
     <div class="card pad" style="margin-bottom:16px">
       <div class="between" style="margin-bottom:4px"><div class="eyebrow">บันทึกรายการซ่อม</div>
@@ -1207,22 +1188,6 @@ async function renderPL(body) {
     const html = externalMonthHTML({ list: extThisMonth, monthLabelStr: monthLabel(dates[dates.length - 1]), companies, viewerRole: 'owner' });
     printDoc(html, 'เดือนที่เลือกยังไม่มีบิลขายนอก');
   });
-  const mdt = $('#mdToggleBtn'); if (mdt) mdt.addEventListener('click', () => { S.mdOpen = !S.mdOpen; renderPL(body); });
-  const mds = $('#mdSubmitBtn'); if (mds) mds.addEventListener('click', async () => {
-    const amount = N(numIn($('#mdAmount').value)), date = $('#mdDate').value;
-    if (!(amount > 0)) { toast('กรอกยอดให้ถูกต้อง'); return; }
-    if (!date || date < dates[0] || date > dates[dates.length - 1]) { toast('วันที่ต้องอยู่ในเดือนที่เลือก'); return; }
-    mds.disabled = true;
-    const { error } = await supabase.from('manual_deliveries').insert({ branch_id: $('#mdBranch').value, delivery_date: date, amount, note: ($('#mdNote').value || '').trim() || null });
-    if (error) { mds.disabled = false; toast('บันทึกไม่สำเร็จ: ' + error.message); return; }
-    toast('บันทึกต้นทุนวัตถุดิบแล้ว'); renderPL(body);
-  });
-  body.querySelectorAll('[data-mddel]').forEach(btn => btn.addEventListener('click', async () => {
-    if (btn.dataset.confirm !== '1') { btn.dataset.confirm = '1'; btn.textContent = 'กดอีกครั้งเพื่อลบ'; return; }
-    const { error } = await supabase.from('manual_deliveries').delete().eq('id', btn.dataset.mddel);
-    if (error) { toast('ลบไม่สำเร็จ: ' + error.message); return; }
-    toast('ลบแล้ว'); renderPL(body);
-  }));
   const rt = $('#repairToggleBtn'); if (rt) rt.addEventListener('click', () => { S.repairOpen = !S.repairOpen; renderPL(body); });
   const rs = $('#repairSubmitBtn'); if (rs) rs.addEventListener('click', async () => {
     const bid = $('#repairBidSel').value, desc = ($('#repairDesc').value || '').trim(), cost = N($('#repairCost').value);
