@@ -159,6 +159,14 @@ export function monthMaterialCost(deliveries, stockItemsById) {
   }, 0), 0);
 }
 
+/* คลังกลาง "ต้องสั่งเพิ่ม": ตั้งขั้นต่ำ (wh_min หน่วยเล็กสุด) ไว้ = ของรวมต่ำกว่าขั้นต่ำ · ไม่ได้ตั้ง = ลังเต็มเหลือ 0
+   row = แถว warehouse_stock (ยังไม่เคยนับ = ไม่ถือว่าต้องสั่ง) — เจ้าของสั่ง 1 ต.ค. 69 */
+export function whLow(item, row) {
+  if (!row || row.case_qty == null) return false;
+  const units = N(row.case_qty) * N(item.per_case) + N(row.loose_qty);
+  return item.wh_min != null && item.wh_min !== '' ? units < N(item.wh_min) : N(row.case_qty) < 1;
+}
+
 /* จำนวนที่ต้องจัดส่ง = ส่วนที่ขาด (par − have) ปัดขึ้นเป็นทวีคูณของ "ส่งทีละ" (ship_pack)
    เช่น โซดา par 10 ส่งทีละ 12: เหลือ 9 → ส่ง 12 · เหลือ 0 → ส่ง 12 · เหลือ 10 → ไม่ต้องส่ง (เจ้าของสั่ง 1 ต.ค. 69) */
 export function shipNeed(par, have, shipPack) {

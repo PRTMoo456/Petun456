@@ -535,6 +535,18 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log('✓ ทำงานวันหยุด — นับจากโควตาที่ไม่ได้หยุด คิดตอนเดือนจบ 400/450/500/550');
 }
 
+// 4.17.7 ขั้นต่ำคลังกลาง (wh_min หน่วยเล็กสุด) — เจ้าของสั่ง 1 ต.ค. 69
+{
+  const milk = { per_case: 48, wh_min: 200 }, tea = { per_case: 40, wh_min: 2 }, plain = { per_case: 12 };
+  check('นมจืด 71 กระป๋อง < 200 → ต้องสั่ง', calc.whLow(milk, { case_qty: 1, loose_qty: 23 }) === true, 'ไม่เตือน');
+  check('นมจืด 240 กระป๋อง → พอ', calc.whLow(milk, { case_qty: 5, loose_qty: 0 }) === false, 'เตือนผิด');
+  check('ชา 2 ห่อ = ขั้นต่ำ → ยังพอ', calc.whLow(tea, { case_qty: 0, loose_qty: 2 }) === false, 'เตือนผิด');
+  check('ชา 1 ห่อ → ต้องสั่ง', calc.whLow(tea, { case_qty: 0, loose_qty: 1 }) === true, 'ไม่เตือน');
+  check('ไม่ตั้งขั้นต่ำ ใช้กติกาเดิม (ลังเต็ม 0)', calc.whLow(plain, { case_qty: 0, loose_qty: 11 }) === true && calc.whLow(plain, { case_qty: 1, loose_qty: 0 }) === false, 'ผิด');
+  check('ยังไม่เคยนับ ไม่ถือว่าต้องสั่ง', calc.whLow(milk, null) === false, 'ผิด');
+  console.log('✓ ขั้นต่ำคลังกลาง — ต่ำกว่าขั้นต่ำขึ้นต้องสั่งเพิ่ม · ไม่ตั้ง = ลังเต็มเหลือ 0');
+}
+
 // 4.18 ค่าปรับลืมลงเวลา — ยกเลิกแล้ว (1 ต.ค. 69)
 {
   const mk = clockRows => {

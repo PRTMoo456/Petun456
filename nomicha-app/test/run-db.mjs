@@ -136,6 +136,14 @@ const getRec = async (n) => (await pg.query(`select * from daily_records where b
   console.log('✓ ต้นทุนส่งนอกแอป — ตารางสร้างได้ เจ้าของบันทึกได้');
 }
 
+// ---------- 6. migration 017: ขั้นต่ำคลังกลาง ----------
+{
+  const rows = (await pg.query(`select name, wh_min from stock_items where wh_min is not null order by name`)).rows;
+  const m = Object.fromEntries(rows.map(r => [r.name, r.wh_min]));
+  check('ตั้งขั้นต่ำครบ 6 รายการ', rows.length === 6 && m['ถุงคู่'] === 10 && m['ผงโอวัลติน'] === 5 && m['คาร์เนชั่น นมจืด'] === 200 && m['ชาพีช'] === 2 && m['ชากุหลาบ'] === 2 && m['ชามะลิ'] === 2, JSON.stringify(m));
+  console.log('✓ ขั้นต่ำคลังกลาง — ถุงคู่ 10 · โอวัลติน 5 · นมจืด 200 · ชาพีช/กุหลาบ/มะลิ 2');
+}
+
 console.log('');
 if (fails.length) { console.log('✗ ไม่ผ่าน ' + fails.length + ' ข้อ:'); fails.forEach(f => console.log('   • ' + f)); }
 else console.log('✓✓ ผ่านทุกข้อ');

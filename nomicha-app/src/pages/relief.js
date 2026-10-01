@@ -243,13 +243,13 @@ async function renderWh(el) {
   if (!el) return;
   const { data: stock } = await supabase.from('warehouse_stock').select('*');
   const stockById = {}; (stock || []).forEach(s => { stockById[s.item_id] = s; });
-  const low = STOCK_ITEMS.filter(it => (stockById[it.id]?.case_qty ?? 0) < 1).length;
+  const low = STOCK_ITEMS.filter(it => calc.whLow(it, stockById[it.id])).length;
   const lastChecked = (stock || []).reduce((m, s) => (!m || (s.last_checked && s.last_checked > m)) ? s.last_checked : m, null);
   const rows = STOCK_ITEMS.map(it => {
     const cur = stockById[it.id]?.case_qty, curL = stockById[it.id]?.loose_qty;
     const val = S.whDraft[it.id] != null ? S.whDraft[it.id] : (cur ?? '');
     const valL = S.whDraftLoose[it.id] != null ? S.whDraftLoose[it.id] : (curL ?? '');
-    const isLow = cur != null && cur < 1;
+    const isLow = calc.whLow(it, stockById[it.id]);
     const curTxt = cur != null ? `มีอยู่ ${cur} ลัง${curL ? ` + ${curL} ชิ้นเศษ` : ''}` : 'ยังไม่เคยนับ';
     return `<div class="stockrow whrow"><div><div class="nm">${esc(it.name)} ${isLow ? '<span class="pill bad" style="margin-left:4px">ใกล้หมด</span>' : ''}</div>
         <div class="un">${curTxt}</div></div>
@@ -271,7 +271,7 @@ async function renderWh(el) {
     </div>
     <button class="btn primary big" id="whSaveBtn">บันทึกจำนวนที่นับได้</button>
     <div class="card pad" id="purchCard">${renderPurchCard()}</div>
-    <p class="foot">เจ้าของจะเห็นรายการที่เหลือน้อยกว่า 1 ลังในหน้าเจ้าของ → สต๊อก → คลังกลาง</p>
+    <p class="foot">"ใกล้หมด" = ต่ำกว่าขั้นต่ำที่เจ้าของตั้งไว้ (ไม่ได้ตั้ง = ลังเต็มเหลือ 0) — เจ้าของเห็นรายการเดียวกันในหน้าเจ้าของ → สต๊อก → คลังกลาง</p>
   `;
   el.querySelectorAll('input[data-whcount]').forEach(inp => inp.addEventListener('input', () => { S.whDraft[inp.dataset.whcount] = inp.value; }));
   el.querySelectorAll('input[data-whloose]').forEach(inp => inp.addEventListener('input', () => { S.whDraftLoose[inp.dataset.whloose] = inp.value; }));
