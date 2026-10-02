@@ -853,6 +853,27 @@ if (ownerHTML.pay && ownerHTML.pl) {
   await new Promise(r => setTimeout(r, 120));
   document.querySelector('[data-rtab="pack"]').click();
   await new Promise(r => setTimeout(r, 160));
+  // ส่งของ: ไม่มีปุ่มเลือกรอบจันทร์/ศุกร์ · มีช่องส่งจริงใส่ให้อัตโนมัติ · ยืนยันทีละสาขา ตัดสต๊อกตามส่งจริง
+  {
+    const h = document.getElementById('roleRoot').innerHTML;
+    check('ไม่มีปุ่มเลือกรอบจันทร์/ศุกร์', !/data-round="r1"|data-round="r2"/.test(h), 'ยังมีปุ่มรอบ');
+    const inp = document.querySelector('[data-sendq]');
+    check('มีช่องส่งจริง ใส่ตัวเลขให้อัตโนมัติ', !!inp && inp.value !== '', 'ไม่พบช่องหรือว่าง');
+    if (inp) {
+      const [bid, iid] = inp.dataset.sendq.split('|');
+      const it = db.stock_items.find(x => x.id === +iid);
+      const unitsOf = () => { const w = db.warehouse_stock.find(x => x.item_id === +iid); return w.case_qty * it.per_case + w.loose_qty; };
+      const u0 = unitsOf();
+      inp.value = '1'; inp.dispatchEvent(new dom.window.Event('input'));
+      document.querySelector(`[data-packgo="${bid}"]`).click(); await new Promise(r => setTimeout(r, 200));
+      const dv = db.deliveries.find(d => d.branch_id === bid && Number(d.items?.[iid]) === 1);
+      check('ยืนยันแล้วบันทึกตามจำนวนส่งจริง', !!dv, 'ไม่พบใบส่งของ');
+      check('ตัดสต๊อกคลังตามส่งจริง', unitsOf() <= u0 - 1, `ก่อน ${u0} หลัง ${unitsOf()}`);
+      check('สาขาที่ส่งแล้วขึ้นป้ายส่งแล้ว', /ส่งแล้ว/.test(document.getElementById('roleRoot').innerHTML), 'ไม่ขึ้นป้าย');
+      check('เพิ่มสาขานอกรอบได้', !!document.querySelector('[data-packextra]') || db.branches.length <= 3, 'ไม่มีปุ่มเพิ่มสาขา');
+    }
+    console.log('✓ ส่งของ — วันส่งถัดไปอัตโนมัติ · ช่องส่งจริง · ยืนยันทีละสาขา ตัดสต๊อกตามจริง');
+  }
   document.querySelector('[data-round="wh"]').click();
   await new Promise(r => setTimeout(r, 200));
   document.getElementById('purchToggleBtn').click();
