@@ -49,18 +49,17 @@ export default async function handler(req, res) {
   if (!target?.group_id) return res.status(409).json({ error: 'LINE group has not been linked yet' });
 
   const byBranch = new Map((records || []).map(record => [record.branch_id, record]));
-  let sales = 0, cups = 0, variance = 0, mismatch = 0;
+  let sales = 0, cups = 0;
   const lines = (branches || []).map(branch => {
     const record = byBranch.get(branch.id);
     if (!record) return `• ${branch.name}: ยังไม่ส่งยอด`;
-    const sum = daySummary(record); sales += sum.sales; cups += sum.cups; variance += sum.variance;
+    const sum = daySummary(record); sales += sum.sales; cups += sum.cups;
     const cashStatus = Math.abs(sum.variance) < 0.01 ? '✓ ยอดตรง'
-      : (mismatch++, sum.variance > 0 ? `เงินสดเกิน ${money(sum.variance)}` : `เงินสดขาด ${money(Math.abs(sum.variance))}`);
+      : sum.variance > 0 ? `เงินสดเกิน ${money(sum.variance)}` : `เงินสดขาด ${money(Math.abs(sum.variance))}`;
     return sum.closed ? `• ${branch.name}: ปิดร้าน` : `• ${branch.name}: ยอดสุทธิ ${money(sum.sales)} · ${sum.cups} แก้ว · ${cashStatus}`;
   });
   const text = [`สรุปยอดร้านน้ำคาเซน ${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}`, ...lines,
-    '', `รวมยอดสุทธิ ${money(sales)}`, `รวม ${cups} แก้ว`,
-    mismatch ? `⚠ ยอดไม่ตรง ${mismatch} สาขา · เงินสดรวม ${variance > 0 ? 'เกิน' : 'ขาด'} ${money(Math.abs(variance))}` : '✓ ยอดเงินตรงทุกสาขา'].join('\n');
+    '', `รวมยอดสุทธิ ${money(sales)}`, `รวม ${cups} แก้ว`].join('\n');
   try { await pushLineMessage(process.env.LINE_CHANNEL_ACCESS_TOKEN, target.group_id, text); }
   catch (error) { return res.status(502).json({ error: error.message }); }
   return res.status(200).json({ ok: true, date, sales, cups });
