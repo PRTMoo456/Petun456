@@ -31,22 +31,19 @@ async function pushLineMessage(token, groupId, text) {
   if (!response.ok) throw new Error(`LINE returned ${response.status}`);
 }
 
-export default async function handler(req, res) {
-  const expected = process.env.CRON_SECRET;
-  if (!expected || req.headers.authorization !== `Bearer ${expected}`) return res.status(401).json({ error: 'Unauthorized' });
-  const date = typeof req.query.date === 'string' ? req.query.date : thaiDate();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date' });
-
+export async function sendDailySummary({ date = thaiDate(), groupId } = {}) {
   const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const [{ data: target, error: targetError }, { data: branches, error: branchError }, { data: records, error: recordError }] = await Promise.all([
-    db.from('line_report_targets').select('group_id').eq('id', 'daily_summary').eq('active', true).maybeSingle(),
+    groupId
+      ? Promise.resolve({ data: { group_id: groupId }, error: null })
+      : db.from('line_report_targets').select('group_id').eq('id', 'daily_summary').eq('active', true).maybeSingle(),
     db.from('branches').select('id,name').eq('active', true).order('id'),
     db.from('daily_records').select('*').eq('record_date', date).eq('sent', true),
   ]);
-  if (targetError || branchError || recordError) return res.status(500).json({ error: 'Could not load report data' });
-  if (!target?.group_id) return res.status(409).json({ error: 'LINE group has not been linked yet' });
+  if (targetError || branchError || recordError) throw new Error('Could not load report data');
+  if (!target?.group_id) throw new Error('LINE group has not been linked yet');
 
   const byBranch = new Map((records || []).map(record => [record.branch_id, record]));
   let sales = 0, cups = 0;
@@ -61,6 +58,19 @@ export default async function handler(req, res) {
   const text = [`📊 สรุปยอดร้านน้ำคาเซน`, `ประจำวันที่ ${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}`,
     '━━━━━━━━━━━━━━', lines.join('\n\n'), '━━━━━━━━━━━━━━', `💰 รวมยอดสุทธิ ${money(sales)} บาท`, `🥤 รวม ${cups} แก้ว`].join('\n');
   try { await pushLineMessage(process.env.LINE_CHANNEL_ACCESS_TOKEN, target.group_id, text); }
-  catch (error) { return res.status(502).json({ error: error.message }); }
-  return res.status(200).json({ ok: true, date, sales, cups });
+  catch (error) { throw new Error(error.message); }
+  return { date, sales, cups };
+}
+
+export default async function handler(req, res) {
+  const expected = process.env.CRON_SECRET;
+  if (!expected || req.headers.authorization !== `Bearer ${expected}`) return res.status(401).json({ error: 'Unauthorized' });
+  const date = typeof req.query.date === 'string' ? req.query.date : thaiDate();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date' });
+  try {
+    const result = await sendDailySummary({ date });
+    return res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(502).json({ error: error.message });
+  }
 }

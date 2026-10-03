@@ -2,6 +2,7 @@
 // ตั้ง Webhook URL เป็น https://<vercel-domain>/api/line-webhook แล้วพิมพ์ "เริ่มสรุป" ในกลุ่ม
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import { sendDailySummary } from './line-daily-summary.js';
 
 // LINE เซ็นลายเซ็นจาก raw request body จึงห้ามให้ parser แปลง body ก่อนตรวจ
 export const config = { api: { bodyParser: false } };
@@ -32,7 +33,9 @@ export default async function handler(req, res) {
   const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const commands = new Set(['เริ่มสรุป', 'เริ่มรายงาน']);
+  const linkCommands = new Set(['เริ่มสรุป', 'เริ่มรายงาน']);
+  const testCommands = new Set(['ทดสอบรายงาน', 'ทดสอบสรุป']);
+  const commands = new Set([...linkCommands, ...testCommands]);
   const groupEvents = (payload.events || []).filter(event =>
     event.source?.type === 'group' && event.source.groupId && event.type === 'message' &&
     event.message?.type === 'text' && commands.has(event.message.text.trim()),
@@ -43,6 +46,10 @@ export default async function handler(req, res) {
       id: 'daily_summary', group_id: event.source.groupId, active: true, updated_at: new Date().toISOString(),
     });
     if (error) return res.status(500).json({ error: 'Could not save LINE group' });
+    if (testCommands.has(event.message.text.trim())) {
+      try { await sendDailySummary({ groupId: event.source.groupId }); }
+      catch (error) { return res.status(502).json({ error: error.message }); }
+    }
   }
   return res.status(200).json({ ok: true, linked: groupEvents.length > 0 });
 }
