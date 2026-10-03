@@ -2,6 +2,12 @@
 
 ระบบสรุปยอด 5 สาขา (ต่อยอดจากต้นแบบสาธิต) เขียนด้วย Vite + vanilla JavaScript + Supabase (ฐานข้อมูล + ระบบล็อกอิน)
 
+## สรุปยอดผ่าน LINE
+
+ระบบส่งสรุปยอดทุกวันเวลา 21:00 ตามเวลาไทย (Vercel Cron) หลังตั้งค่าให้รัน migration `supabase/migrations/019_line_daily_summary.sql` แล้วเพิ่ม Environment Variables ใน Vercel: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, และ `CRON_SECRET`.
+
+ตั้ง Webhook URL ใน LINE เป็น `https://<โดเมน-vercel>/api/line-webhook` จากนั้นเชิญ OA เข้ากลุ่มและพิมพ์ `เริ่มสรุป` หนึ่งครั้ง ระบบจะจำกลุ่มนั้นเป็นปลายทางรายงานโดยอัตโนมัติ. ห้ามเก็บค่า secret หรือ token ไว้ในโค้ดหรือส่งผ่านแชต.
+
 - สเปกทั้งหมด: โปรเจกต์ "สรุปยอดสาขา" ในบัญชี Claude (`claude/concept-spec.md`)
 - ต้นแบบสาธิต (ข้อมูลจำลอง): https://claude.ai/code/artifact/81c486e4-218e-4084-a119-8e749717c3b3
 - **วิธีติดตั้ง: อ่าน [`docs/DEPLOY.md`](./docs/DEPLOY.md) ทำตามทีละขั้น**
