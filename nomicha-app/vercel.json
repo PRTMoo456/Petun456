@@ -7,6 +7,10 @@
     {
       "path": "/api/line-warehouse-status",
       "schedule": "0 1 * * 0,4"
+    },
+    {
+      "path": "/api/line-monthly-summary",
+      "schedule": "0 14 * * *"
     }
   ]
 }
