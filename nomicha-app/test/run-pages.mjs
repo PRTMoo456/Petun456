@@ -260,14 +260,14 @@ if (ownerHTML.pay && ownerHTML.pl) {
   console.log(`✓ เงินสดค้างส่ง ${Math.round(p.amount).toLocaleString('th-TH')} บาท ตรงกับผลรวมรายวัน`);
 }
 
-// 4.8 หัวหน้าไปแทนสาขาแล้วปิดยอด — "แถวแก้ว" ในสต๊อกต้องคิดจากยอดที่นับวันนี้ ไม่ใช่ลอกของเมื่อวานมาทั้งก้อน
+// 4.8 หัวหน้าไปแทนสาขาแล้วปิดยอด — เก็บสต๊อกที่นับจริง และ "แถวแก้ว" คิดจากยอดที่นับวันนี้
 {
   const { submitClose } = await import('../src/close.js');
   const before = db.daily_records.length;
   await submitClose({
     branchId: 'nlb', dateISO: TODAY, staffName: 'ขวัญ',
     draft: { yen: 120, yenAdd: 0, pan: 60, panAdd: 0, cupOwn: 0, topping: 0, other: 0, ice: 0, water: 0, etc: 0,
-             cash: 900, transfer: 0, grab: 0, thaichaithai: 0, float: 300 },
+             cash: 900, transfer: 0, grab: 0, thaichaithai: 0, float: 300, stock: { 2: 11, 3: 13 } },
     cfg, stockItems: db.stock_items, prevSnapshot: { 0: 9, 1: 9, 2: 5, 3: 7 }, createdBy: 'u-rel',
     openYen: 150, openPan: 75,
   });
@@ -275,9 +275,9 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('บันทึกยอดของหัวหน้า', db.daily_records.length === before + 1, 'ไม่มีแถวใหม่');
   check('แถวแก้วคิดจากยอดวันนี้', rec.stock_snapshot[0] === Math.floor(120 / 50) && rec.stock_snapshot[1] === Math.floor(60 / 25),
     `ได้ ${rec.stock_snapshot[0]}/${rec.stock_snapshot[1]} ควรเป็น 2/2 (ไม่ใช่ 9/9 ที่ลอกมาจากเมื่อวาน)`);
-  check('วัตถุดิบอื่นใช้ของเมื่อวาน', rec.stock_snapshot[2] === 5 && rec.stock_snapshot[3] === 7,
-    `วันไปแทนไม่ได้นับสต๊อก ต้องคงยอดเมื่อวานไว้ แต่ได้ ${rec.stock_snapshot[2]}/${rec.stock_snapshot[3]}`);
-  console.log('✓ หัวหน้าปิดยอดแทนสาขา — แถวแก้วคิดจากที่นับวันนี้ วัตถุดิบอื่นคงยอดเมื่อวาน');
+  check('วัตถุดิบอื่นใช้ยอดที่หัวหน้านับจริง', rec.stock_snapshot[2] === 11 && rec.stock_snapshot[3] === 13,
+    `หัวหน้านับได้ 11/13 แต่บันทึก ${rec.stock_snapshot[2]}/${rec.stock_snapshot[3]}`);
+  console.log('✓ หัวหน้าปิดยอดแทนสาขา — แถวแก้วคิดจากที่นับวันนี้ และเก็บยอดวัตถุดิบที่นับจริง');
 }
 
 // 4.8b ราคาและต้นทุนใหม่ต้องไม่ย้อนเปลี่ยนรายการเก่า
@@ -362,7 +362,11 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('ยังไม่นับแก้ว ต้องไม่มีปุ่มส่งยอด', !/id="reliefSendBtn"/.test(h),
     'หัวหน้าส่งยอดได้ทั้งที่ยังไม่ได้นับแก้วก่อนขาย → ยอดขายวันนั้นจะกลายเป็น 0');
   check('ต้องขึ้นการ์ดนับแก้วก่อน', /id="rOpenCountBtn"/.test(h), 'ไม่ขึ้นการ์ดให้นับแก้วก่อนขาย');
-  console.log('✓ หัวหน้าไปแทนสาขา — บังคับนับแก้วก่อนขายให้เสร็จก่อน ถึงจะปิดยอดได้');
+  const setReliefVal = (sel, v) => { const el = document.querySelector(sel); if (el) { el.value = v; el.dispatchEvent(new dom.window.Event('input')); } };
+  setReliefVal('#rOpenYen', '20'); setReliefVal('#rOpenPan', '10');
+  document.querySelector('#rOpenCountBtn').click(); await new Promise(r => setTimeout(r, 200));
+  check('หัวหน้าเห็นช่องเช็กวัตถุดิบเมื่อไปแทน', !!document.querySelector('input[data-stock="2"]'), 'เปิดฟอร์มปิดยอดแล้วไม่มีช่องเช็กวัตถุดิบ');
+  console.log('✓ หัวหน้าไปแทนสาขา — บังคับนับแก้วก่อนขาย และมีช่องเช็กวัตถุดิบก่อนส่งยอด');
   // ปุ่มเดือนก่อน/เดือนนี้ในการ์ดเงินเดือนหัวหน้า + วันเริ่มงาน
   const rel = db.employees.find(e => e.id === 'u-rel'); const oldStart = rel.start_date; rel.start_date = TODAY.slice(0, 8) + '01';
   const pbtn = document.querySelector('[data-rpaymonth="prev"]');

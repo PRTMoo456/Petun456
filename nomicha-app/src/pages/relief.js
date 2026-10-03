@@ -701,7 +701,7 @@ async function renderClock(body) {
       ${clock.time_in && openSet ? `<button class="btn primary big" id="reliefSendBtn">ส่งยอดแทนสาขา</button>
         <p class="sub" style="text-align:center;margin:0">ส่งแล้วแก้เองไม่ได้ ตรวจให้ครบก่อนกด</p>` : ''}`;
 
-  box.innerHTML = inner + payCard + `<p class="foot">วันที่ไปทำแทน หน้านี้เปิดฟอร์มปิดยอดของสาขานั้นให้กรอกได้เลย (ไม่ต้องนับสต๊อก) และแก้วที่ทำวันนั้นเข้าค่าแก้วของคุณ</p>`;
+  box.innerHTML = inner + payCard + `<p class="foot">วันที่ไปทำแทน หน้านี้เปิดฟอร์มปิดยอดและเช็กวัตถุดิบคงเหลือของสาขานั้นให้กรอกได้เลย และแก้วที่ทำวันนั้นเข้าค่าแก้วของคุณ</p>`;
   wireClockTab(box, b, clock, rec, prev, openSet);
   wirePay();
 }
@@ -719,8 +719,8 @@ function reliefOpenCountCard(b, prev) {
 
 function reliefCloseFormHTML(prev) {
   return closeFormHTML({
-    draft: S.reliefDraft, errors: S.reliefErrors, prev, cfg: getSettings(), attr: 'rf', stockItems: null,
-    intro: 'กรอกยอดขายของวันนี้แทนพนักงานประจำสาขา — ไม่ต้องนับสต๊อกวัตถุดิบ (ค่าแก้ววันนี้เข้าเงินเดือนของคุณเอง)',
+    draft: S.reliefDraft, errors: S.reliefErrors, prev, cfg: getSettings(), attr: 'rf', stockItems: STOCK_ITEMS,
+    intro: 'กรอกยอดขายและนับวัตถุดิบคงเหลือจริงของวันนี้แทนพนักงานประจำสาขา — ระบบขึ้นยอดเมื่อวานไว้ให้แล้ว แก้เฉพาะรายการที่เปลี่ยน (ค่าแก้ววันนี้เข้าเงินเดือนของคุณเอง)',
   });
 }
 
@@ -728,6 +728,10 @@ function wireClockTab(box, b, clock, rec, prev, openSet) {
   const cb = $('#reliefClockBtn'); if (cb) cb.addEventListener('click', () => doReliefClock(b, clock));
   const ocBtn = $('#rOpenCountBtn'); if (ocBtn) ocBtn.addEventListener('click', () => doReliefOpenCount(b, prev));
   box.querySelectorAll('input[data-rf]').forEach(inp => inp.addEventListener('input', () => { S.reliefDraft[inp.dataset.rf] = numIn(inp.value); }));
+  // คนไปแทนต้องนับวัตถุดิบเหมือนพนักงานประจำ เพื่อให้ยอดคงเหลือของสาขาและใบจัดของรอบถัดไปถูกต้อง
+  box.querySelectorAll('input[data-stock]').forEach(inp => inp.addEventListener('input', () => {
+    S.reliefDraft.stock[inp.dataset.stock] = numIn0(inp.value);
+  }));
   const sendBtn = $('#reliefSendBtn'); if (sendBtn) sendBtn.addEventListener('click', () => doReliefSend(b, clock, prev));
 }
 
@@ -779,7 +783,7 @@ async function doReliefSend(b, clock, prev) {
     const first = document.querySelector('.field input.err'); if (first) first.scrollIntoView({ block: 'center' });
     return;
   }
-  // สต๊อกวัตถุดิบใช้ของยอดปิดล่าสุด (วันไปแทนไม่ต้องนับ) แต่ "แถวแก้ว" คิดจากที่นับวันนี้ — submitClose จัดการให้แล้ว
+  // บันทึกสต๊อกที่นับจริงจากฟอร์ม โดย "แถวแก้ว" คิดจากที่นับวันนี้เสมอ
   if(todayISO()!==TODAY){await draw($('#roleRoot'));toast('ข้ามวันแล้ว โหลดข้อมูลวันใหม่ให้แล้ว');return;}
   const btn=$('#reliefSendBtn');if(btn){btn.disabled=true;btn.textContent='กำลังบันทึก…';}
   const { error } = await submitClose({
