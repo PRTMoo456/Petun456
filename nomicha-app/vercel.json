@@ -3,6 +3,10 @@
     {
       "path": "/api/line-daily-summary",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/line-warehouse-status",
+      "schedule": "0 1 * * 0,4"
     }
   ]
 }
