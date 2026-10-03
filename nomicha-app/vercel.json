@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/line-daily-summary",
-      "schedule": "0 14 * * *"
+      "schedule": "0 13 * * *"
     },
     {
       "path": "/api/line-warehouse-status",

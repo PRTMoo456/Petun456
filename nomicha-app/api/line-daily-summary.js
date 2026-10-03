@@ -1,4 +1,4 @@
-// Vercel Cron: ส่งสรุปยอดปิดร้านทุกวัน 21:00 เวลาไทย (14:00 UTC)
+// Vercel Cron: ส่งสรุปยอดปิดร้านทุกวัน 20:00 เวลาไทย (13:00 UTC)
 import { createClient } from '@supabase/supabase-js';
 
 const n = value => Number(value) || 0;
