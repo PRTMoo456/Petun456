@@ -52,14 +52,14 @@ export default async function handler(req, res) {
   let sales = 0, cups = 0;
   const lines = (branches || []).map(branch => {
     const record = byBranch.get(branch.id);
-    if (!record) return `• ${branch.name}: ยังไม่ส่งยอด`;
+    if (!record) return `【${branch.name}】\nยังไม่ส่งยอด`;
     const sum = daySummary(record); sales += sum.sales; cups += sum.cups;
-    const cashStatus = Math.abs(sum.variance) < 0.01 ? '✓ ยอดตรง'
-      : sum.variance > 0 ? `เงินสดเกิน ${money(sum.variance)}` : `เงินสดขาด ${money(Math.abs(sum.variance))}`;
-    return sum.closed ? `• ${branch.name}: ปิดร้าน` : `• ${branch.name}: ยอดสุทธิ ${money(sum.sales)} · ${sum.cups} แก้ว · ${cashStatus}`;
+    const cashStatus = Math.abs(sum.variance) < 0.01 ? 'ยอดตรง'
+      : sum.variance > 0 ? `เงินสดเกิน ${money(sum.variance)} บาท` : `เงินสดขาด ${money(Math.abs(sum.variance))} บาท`;
+    return sum.closed ? `【${branch.name}】\nปิดร้าน` : `【${branch.name}】\nยอดสุทธิ ${money(sum.sales)} บาท · ${sum.cups} แก้ว\nสถานะ: ${cashStatus}`;
   });
-  const text = [`สรุปยอดร้านน้ำคาเซน ${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}`, ...lines,
-    '', `รวมยอดสุทธิ ${money(sales)}`, `รวม ${cups} แก้ว`].join('\n');
+  const text = [`📊 สรุปยอดร้านน้ำคาเซน`, `ประจำวันที่ ${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}`,
+    '━━━━━━━━━━━━━━', lines.join('\n\n'), '━━━━━━━━━━━━━━', `💰 รวมยอดสุทธิ ${money(sales)} บาท`, `🥤 รวม ${cups} แก้ว`].join('\n');
   try { await pushLineMessage(process.env.LINE_CHANNEL_ACCESS_TOKEN, target.group_id, text); }
   catch (error) { return res.status(502).json({ error: error.message }); }
   return res.status(200).json({ ok: true, date, sales, cups });
