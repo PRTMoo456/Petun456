@@ -696,7 +696,7 @@ async function renderStockWh(el, seg) {
     const low = calc.whLow(it, row);
     const status = cur == null ? '<span class="pill warn">ยังไม่เคยนับ</span>' : low ? '<span class="pill bad">ต้องสั่งเพิ่ม</span>' : '<span class="pill ok">พอใช้</span>';
     const qty = cur == null ? '–' : `${cur} ลัง${curL ? ` <span class="sub" style="font-size:11px">+${curL} ชิ้นเศษ</span>` : ''}`;
-    const minTxt = it.wh_min != null ? `ขั้นต่ำ ${it.wh_min} ${esc(it.unit)}` : 'ขั้นต่ำ 1 ลัง';
+    const minTxt = `ขั้นต่ำ ${it.wh_min ?? it.per_case} ${esc(it.unit)}`;
     return `<tr><td>${esc(it.name)}<div class="sub" style="font-size:11px">${minTxt}</div></td><td class="n ${low ? 'low' : ''}">${qty}</td><td>${status}</td></tr>`;
   }).join('');
   const lows = STOCK_ITEMS.filter(it => calc.whLow(it, byId[it.id])).length;
@@ -713,7 +713,7 @@ async function renderStockWh(el, seg) {
     <div class="tablewrap" style="max-height:72vh;overflow-y:auto"><table>
       <thead><tr><th>วัตถุดิบ</th><th>มีอยู่ในคลังกลาง</th><th>สถานะ</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-    <p class="foot">หัวหน้าเป็นคนนับของจริงที่คลังกลาง (หน้าหัวหน้า → รอบส่งของ → เช็คสต๊อก) — ของรวมต่ำกว่า "ขั้นต่ำคลัง" ขึ้นธง "ต้องสั่งเพิ่ม" (รายการที่ไม่ได้ตั้งขั้นต่ำ = ลังเต็มเหลือ 0) · ตั้งขั้นต่ำได้ที่ ตั้งค่า → ระดับสต๊อกต่อรอบ</p>`;
+    <p class="foot">หัวหน้าเป็นคนนับของจริงที่คลังกลาง (หน้าหัวหน้า → รอบส่งของ → เช็คสต๊อก) — ของรวมต่ำกว่า "ขั้นต่ำคลัง" ขึ้นธง "ต้องสั่งเพิ่ม" (รายการที่ไม่ได้ตั้ง = 1 ลัง) · ตั้งขั้นต่ำได้ที่ ตั้งค่า → ระดับสต๊อกต่อรอบ</p>`;
 }
  
 async function renderStockDeliveries(el, seg) {
@@ -1270,7 +1270,7 @@ async function renderSet(body) {
     return `<div class="setrow"><span>${esc(it.name)} <span class="sub">(${esc(it.unit)})${usedByItem[it.id] ? ` · ใช้จริง 7 วันล่าสุด ${usedByItem[it.id]}` : ''}</span></span>
       <span class="row" style="flex-wrap:wrap;row-gap:6px;justify-content:flex-end">
       <span class="sub">ระดับต่อรอบ</span><input value="${p?.par_qty ?? 0}" data-par="${it.id}" data-parb="${pb.id}" style="width:64px">
-      <span class="sub">ขั้นต่ำคลัง</span><input value="${it.wh_min ?? ''}" data-whmin="${it.id}" inputmode="numeric" placeholder="1 ลัง" title="ของในคลังกลางต่ำกว่าจำนวนนี้ (หน่วยเล็กสุด) = ต้องสั่งเพิ่ม · เว้นว่าง = เหลือลังเต็ม 0 ถึงเตือน" style="width:56px">
+      <span class="sub">ขั้นต่ำคลัง</span><input value="${it.wh_min ?? it.per_case}" data-whmin="${it.id}" inputmode="numeric" title="ของในคลังกลางต่ำกว่าจำนวนนี้ (หน่วย${esc(it.unit)}) = ต้องสั่งเพิ่ม" style="width:56px"><span class="sub">${esc(it.unit)}</span>
       <span class="sub">ส่งทีละ</span><input value="${it.ship_pack ?? 1}" data-shippack="${it.id}" inputmode="numeric" title="ขาดเมื่อไรจัดส่งเป็นทวีคูณของจำนวนนี้ (1 = ส่งตามที่ขาดพอดี) · ใช้ทุกสาขา" style="width:52px">
       <span class="sub">ราคาส่งสาขา</span><input value="${it.branch_price}" data-branchprice="${it.id}" style="width:64px"></span></div>`;
   }).join('');
@@ -1410,12 +1410,13 @@ async function renderSet(body) {
     const it = STOCK_ITEMS.find(x => x.id === +inp.dataset.whmin);
     const raw = String(inp.value).trim();
     let v = null;
-    if (raw !== '') { v = numIn(raw); if (v === '' || !Number.isInteger(v) || v < 0) { toast('ขั้นต่ำต้องเป็นจำนวนเต็มตั้งแต่ 0 (เว้นว่าง = เตือนเมื่อลังเต็มเหลือ 0)'); inp.value = it?.wh_min ?? ''; return; } }
+    if (raw !== '') { v = numIn(raw); if (v === '' || !Number.isInteger(v) || v < 0) { toast(`ขั้นต่ำต้องเป็นจำนวนเต็มตั้งแต่ 0 (หน่วย${it?.unit || ''})`); inp.value = it?.wh_min ?? it?.per_case ?? ''; return; } }
     const { error } = await supabase.from('stock_items').update({ wh_min: v }).eq('id', +inp.dataset.whmin);
     if (error) { toast('บันทึกไม่สำเร็จ: ' + error.message); return; }
     if (it) it.wh_min = v;
     invalidateRefs();
-    toast(v == null ? `${it?.name || ''} — เตือนเมื่อลังเต็มเหลือ 0` : `${it?.name || ''} — ต่ำกว่า ${v} ${it?.unit || ''} ขึ้นต้องสั่งเพิ่ม`);
+    if (v == null && it) inp.value = it.per_case;
+    toast(v == null ? `${it?.name || ''} — ใช้ค่าเริ่มต้น ${it?.per_case} ${it?.unit || ''} (1 ลัง)` : `${it?.name || ''} — ต่ำกว่า ${v} ${it?.unit || ''} ขึ้นต้องสั่งเพิ่ม`);
   }));
   body.querySelectorAll('input[data-shippack]').forEach(inp => inp.addEventListener('change', async () => {
     const it = STOCK_ITEMS.find(x => x.id === +inp.dataset.shippack);
