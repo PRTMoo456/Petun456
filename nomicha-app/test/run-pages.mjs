@@ -846,6 +846,12 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('ไม่มีปุ่มเพิ่ม/ลบยอดในหน้าจอ', !document.getElementById('mdToggleBtn') && !document.querySelector('[data-mddel]'), 'ยังมีปุ่ม');
   db.manual_deliveries.length = 0;
   db.payroll_employee_history.length = 0; db.payroll_branch_history.length = 0; db.payroll_rules_history.length = 0;
+  document.querySelector('[data-otab="stock"]').click(); await new Promise(r => setTimeout(r, 200));
+  for (const v of ['wh', 'deliveries', 'branch', 'wh']) {
+    document.querySelector(`[data-stockview="${v}"]`).click(); await new Promise(r => setTimeout(r, 200));
+    const on = document.querySelector('[data-stockview][aria-pressed="true"]');
+    check(`ปุ่มสต๊อก ${v} ขึ้นสีเมื่อกด`, on && on.dataset.stockview === v, on ? `ขึ้นที่ ${on.dataset.stockview}` : 'ไม่มีปุ่มที่เลือก');
+  }
   console.log('✓ เลือกเดือนย้อนหลัง — เงินเดือนและกำไร/ขาดทุนเปลี่ยนตามเดือนที่เลือก');
 }
 

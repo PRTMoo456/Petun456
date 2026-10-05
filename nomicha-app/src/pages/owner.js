@@ -594,18 +594,22 @@ async function renderSched(body) {
  
 /* ============================== สต๊อก ============================== */
 async function renderStock(body) {
+  body.innerHTML = `<div id="stockInner"><div class="boot">กำลังโหลด…</div></div>`;
+  // กดสลับมุมมองผ่าน delegation — ปุ่มถูกวาดใหม่ทุกครั้ง (เดิมผูกปุ่มชุดแรกครั้งเดียว ปุ่มที่เลือกไม่เปลี่ยนสี และกดซ้ำไม่ได้)
+  $('#stockInner').addEventListener('click', e => {
+    const btn = e.target.closest('[data-stockview]'); if (!btn) return;
+    S.stockView = btn.dataset.stockview; renderStockView();
+  });
+  await renderStockView();
+}
+ 
+async function renderStockView() {
+  const el = $('#stockInner'); if (!el) return;
   const seg = `<span class="seg2">
-      <button data-stockview="branch" aria-pressed="${S.stockView === 'branch'}">รายสาขา</button>
+      <button data-stockview="branch" aria-pressed="${S.stockView !== 'wh' && S.stockView !== 'deliveries'}">รายสาขา</button>
       <button data-stockview="wh" aria-pressed="${S.stockView === 'wh'}">คลังกลาง</button>
       <button data-stockview="deliveries" aria-pressed="${S.stockView === 'deliveries'}">รายงานส่งของ</button>
     </span>`;
-  body.innerHTML = `<div id="stockInner"><div class="boot">กำลังโหลด…</div></div>`;
-  await renderStockView(seg);
-  body.querySelectorAll('[data-stockview]').forEach(btn => btn.addEventListener('click', () => { S.stockView = btn.dataset.stockview; renderStockView(seg); }));
-}
- 
-async function renderStockView(seg) {
-  const el = $('#stockInner'); if (!el) return;
   if (S.stockView === 'wh') return renderStockWh(el, seg);
   if (S.stockView === 'deliveries') return renderStockDeliveries(el, seg);
   return renderStockBranch(el, seg);
