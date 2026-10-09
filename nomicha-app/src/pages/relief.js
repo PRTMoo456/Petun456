@@ -570,27 +570,33 @@ async function renderCash(body) {
     const p = calc.cashPending(records || [], cutoff);
     return { b, p, isToday: !!(round && round.branch_ids.includes(b.id)) };
   }));
-  const todays = list.filter(x => x.isToday);
   const cashStart=BRANCHES.reduce((m,b)=>!m||b.cash_tracking_from>m?b.cash_tracking_from:m,null);
-  const collected = (allRemits || []).filter(x=>x.method==='cash'&&(!cashStart||x.remit_date>=cashStart)).reduce((s, x) => s + N(x.amount), 0);
-  const forwarded = (headRemits || []).filter(x=>!cashStart||x.remit_date>=cashStart).reduce((s, x) => s + N(x.amount), 0);
-  const held = collected - forwarded;
-
-  const rowsToday = todays.map(({ b, p }) => `
+  const held = calc.headCashHeld(allRemits || [], headRemits || [], cashStart);
+  // สาขากดส่งเงินแล้ว รอหัวหน้านับและกดรับ (เหมือนสาขาเช็ครับของ แต่กลับทาง)
+  const waiting = (allRemits || []).filter(x => x.method === 'cash' && !x.received_at)
+    .sort((a, c) => String(a.created_at).localeCompare(String(c.created_at)));
+  const bname = id => (BRANCHES.find(x => x.id === id) || {}).name || id;
+  const waitingRows = waiting.map(r => `
+    <div class="card pad" style="border-left:3px solid var(--amber)">
+      <div class="between" style="margin-bottom:2px"><h3>สาขา${esc(bname(r.branch_id))}</h3>
+        <span class="bigtime" style="font-size:20px">${baht(r.amount)} <span class="sub" style="font-size:12px;font-weight:400">บาท</span></span></div>
+      <p class="sub" style="margin:0 0 10px">สาขากดส่งเงินแล้ว ${fmtDate(r.remit_date)} · ยอดถึงวันที่ ${r.through_record_date ? fmtDate(r.through_record_date) : '—'}</p>
+      <label class="whlbl" style="display:block">นับเงินได้จริง (บาท)
+        <input inputmode="decimal" data-recvamt="${r.id}" value="${esc(String(r.amount))}" style="width:100%;margin-top:4px"></label>
+      <button class="btn primary" data-recv="${r.id}" style="width:100%;margin-top:10px">รับเงินแล้ว</button>
+    </div>`).join('');
+  const waitingIds = new Set(waiting.map(r => r.branch_id));
+  const rowsToday = list.filter(x => x.isToday && !waitingIds.has(x.b.id)).map(({ b, p }) => `
     <div class="card pad">
       <div class="between" style="margin-bottom:2px"><h3>สาขา${esc(b.name)}</h3>
         <span class="bigtime" style="font-size:20px">${baht(p.amount)} <span class="sub" style="font-size:12px;font-weight:400">บาท</span></span></div>
-      <p class="sub" style="margin:0 0 10px">ค้างสะสม ${p.dates.length} วัน${p.dates.length ? ' — ' + p.dates.map(fmtDate).join(' · ') : ''}</p>
-      <div class="row" style="gap:8px">
-        <button class="btn primary" data-remitb="${b.id}" data-remitm="cash" style="flex:1" ${p.amount <= 0 ? 'disabled' : ''}>รับเงินสดแล้ว</button>
-        <button class="btn" data-remitb="${b.id}" data-remitm="transfer" style="flex:1" ${p.amount <= 0 ? 'disabled' : ''}>รับแบบโอนแทน</button>
-      </div>
+      <p class="sub" style="margin:0">${p.amount > 0 ? `ค้างสะสม ${p.dates.length} วัน — ${p.dates.map(fmtDate).join(' · ')} · <b>รอพนักงานกด "ส่งเงิน" ที่เครื่องสาขา</b>` : 'ไม่มีเงินค้างส่ง'}</p>
     </div>`).join('');
 
   const box = $('#cashBox');
   box.innerHTML = `
     <div class="card pad">
-      <div class="between" style="margin-bottom:4px"><div class="eyebrow">เงินสดที่ถืออยู่</div><span class="sub">รวมจากทุกสาขา</span></div>
+      <div class="between" style="margin-bottom:4px"><div class="eyebrow">เงินสดที่ถืออยู่</div><span class="sub">รวมเฉพาะที่กดรับแล้ว</span></div>
       <div class="bigtime">${baht(held)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
       <p class="sub" style="margin:8px 0 10px">ส่งให้เจ้าของได้ทุกเมื่อ ไม่ต้องรอครบรอบ</p>
       <div class="row" style="gap:8px">
@@ -598,28 +604,27 @@ async function renderCash(body) {
         <button class="btn" id="headRemitTransfer" style="flex:1" ${held <= 0 ? 'disabled' : ''}>ฝากธนาคารแล้ว</button>
       </div>
     </div>
+    ${waiting.length ? `<div class="eyebrow" style="margin-top:4px">รอรับเงิน (${waiting.length})</div>${waitingRows}` : ''}
     ${round ? `<div class="card pad" style="border-left:3px solid var(--amber)">
       <div class="eyebrow">วันนี้เป็นวันเก็บเงินสด — ${esc(round.name)}</div>
-      <div class="sub" style="margin-top:2px">${round.branch_ids.map(id => (BRANCHES.find(x => x.id === id) || {}).name || id).join(' · ')}</div>
-    </div>${rowsToday}` : `<div class="card pad"><p class="sub" style="margin:0">วันนี้ไม่ใช่วันรับเงินสดของสาขาไหนเลย</p></div>`}
-    <p class="foot">เงินสดค้าง = เงินสดปิดร้านแต่ละวัน หักเงินทอนตั้งต้นของสาขา สะสมตั้งแต่ครั้งล่าสุดที่ส ่ง/รับไป</p>
+      <div class="sub" style="margin-top:2px">${round.branch_ids.map(id => bname(id)).join(' · ')}</div>
+    </div>${rowsToday}` : (waiting.length ? '' : `<div class="card pad"><p class="sub" style="margin:0">วันนี้ไม่ใช่วันรับเงินสดของสาขาไหนเลย</p></div>`)}
+    <p class="foot">พนักงานกด "ส่งเงิน" ที่เครื่องสาขา → รายการขึ้นที่นี่ → นับเงินจริง ใส่จำนวนที่ได้ แล้วกด "รับเงินแล้ว" · ถ้าเงินไม่ตรงกับยอดในแอป ให้ใส่ตามที่นับได้จริง เจ้าของจะเห็นส่วนต่าง</p>
   `;
-  box.querySelectorAll('[data-remitb]').forEach(btn => btn.addEventListener('click', () => doRemitBranch(btn.dataset.remitb, btn.dataset.remitm, list)));
+  box.querySelectorAll('[data-recv]').forEach(btn => btn.addEventListener('click', () => doReceive(btn.dataset.recv, btn)));
   const hc = $('#headRemitCash'); if (hc) hc.addEventListener('click', () => doHeadRemit('cash', held));
   const ht = $('#headRemitTransfer'); if (ht) ht.addEventListener('click', () => doHeadRemit('transfer', held));
 }
 
-async function doRemitBranch(bid, method, list) {
-  const item = list.find(x => x.b.id === bid);
-  if (!item || item.p.amount <= 0) { toast('ไม่มีเงินสดค้างส่ง'); return; }
-  const btn = document.querySelector(`[data-remitb="${CSS.escape(bid)}"][data-remitm="${CSS.escape(method)}"]`);
-  if (btn) btn.disabled = true;
-  const { error } = await supabase.from('cash_remittances').insert({
-    branch_id: bid, remit_date: TODAY, amount: item.p.amount, method, through_record_date: item.p.throughDate,
-  });
-  if (error) { if (btn) btn.disabled = false; toast('บันทึกรับเงินไม่สำเร็จ: ' + error.message); return; }
-  const bname = (BRANCHES.find(x => x.id === bid) || {}).name || bid;
-  toast(`รับเงินจากสาขา${bname} แล้ว ${baht(item.p.amount)} บาท`);
+async function doReceive(id, btn) {
+  const inp = [...document.querySelectorAll('[data-recvamt]')].find(x => x.dataset.recvamt === id);
+  const v = numIn(inp ? inp.value : '');
+  if (v === '' || !(v >= 0)) { toast('ใส่จำนวนเงินที่นับได้จริง'); return; }
+  btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
+  const { data, error } = await supabase.rpc('receive_branch_cash', { p_remit_id: id, p_amount: v });
+  if (error) { toast('บันทึกรับเงินไม่สำเร็จ: ' + error.message); await draw($('#roleRoot')); return; }
+  const diff = N(data?.received) - N(data?.sent);
+  toast(`รับเงินแล้ว ${baht(v)} บาท` + (diff ? ` (${diff < 0 ? 'ขาด' : 'เกิน'}จากยอดในแอป ${baht(Math.abs(diff))})` : ''));
   await draw($('#roleRoot'));
 }
 async function doHeadRemit(method, held) {

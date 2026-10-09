@@ -905,6 +905,22 @@ if (ownerHTML.pay && ownerHTML.pl) {
     document.querySelector('[data-round="send"]').click(); await new Promise(r => setTimeout(r, 200));
     console.log('✓ ส่งด่วนวันนี้ — บันทึกเป็นวันนี้ แยกจากรอบ · เพิ่มรายการอื่นได้');
   }
+  // ส่งเงิน 2 ขั้น: สาขากดส่งแล้ว → ขึ้นรอรับที่หัวหน้า → ใส่ยอดนับจริง กดรับ (เจ้าของสั่ง 9 ต.ค. 69)
+  {
+    db.cash_remittances.push({ id: 'cr-wait', branch_id: 'bwa', remit_date: TODAY, through_record_date: TODAY, amount: 4514, method: 'cash', created_at: new Date().toISOString(), received_at: null, received_amount: null });
+    document.querySelector('[data-rtab="cash"]').click(); await new Promise(r => setTimeout(r, 200));
+    const inp = document.querySelector('[data-recvamt="cr-wait"]');
+    check('รับเงิน: รายการที่สาขาส่งขึ้นจอหัวหน้า', !!inp && inp.value === '4514', 'ไม่ขึ้นรายการรอรับ');
+    if (inp) {
+      inp.value = '4214';
+      document.querySelector('[data-recv="cr-wait"]').click(); await new Promise(r => setTimeout(r, 200));
+      const row = db.cash_remittances.find(x => x.id === 'cr-wait');
+      check('รับเงิน: บันทึกยอดนับได้จริง', row.received_amount === 4214 && !!row.received_at, JSON.stringify(row));
+      check('รับเงิน: รับแล้วรายการหายจากรอรับ', !document.querySelector('[data-recv="cr-wait"]'), 'ยังค้างอยู่');
+    }
+    document.querySelector('[data-rtab="pack"]').click(); await new Promise(r => setTimeout(r, 200));
+    console.log('✓ ส่งเงิน 2 ขั้น — รายการรอรับขึ้นจอหัวหน้า · รับตามยอดนับจริง');
+  }
   document.querySelector('[data-round="wh"]').click();
   await new Promise(r => setTimeout(r, 200));
   document.getElementById('purchToggleBtn').click();

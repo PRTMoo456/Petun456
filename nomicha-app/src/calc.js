@@ -203,6 +203,15 @@ export function warehousePL({ deliveries, externalSales, stockItemsById, avgCost
   return { sales, cost, materialMargin: sales - cost, headLabor, net: sales - cost - headLabor };
 }
 
+// เงินสดที่หัวหน้าถืออยู่ = เงินสดที่หัวหน้ากดรับจากสาขาแล้ว (ตามจำนวนที่นับได้จริง) − ที่ส่งต่อให้เจ้าของแล้ว
+export function headCashHeld(cashRemits, headRemits, cashStart) {
+  const inRange = d => !cashStart || d >= cashStart;
+  const got = cashRemits.filter(x => x.method === 'cash' && x.received_at && inRange(x.remit_date))
+    .reduce((s, x) => s + N(x.received_amount ?? x.amount), 0);
+  const gave = headRemits.filter(x => inRange(x.remit_date)).reduce((s, x) => s + N(x.amount), 0);
+  return got - gave;
+}
+
 // พอร์ตจาก cashSurplus()/cashPending() — เงินสดที่สาขาเก็บไว้เกินเงินทอนตั้งต้น ต้องส่งให้หัวหน้า
 export function cashPending(records, lastRemitDate) {
   const pendingRows = records.filter(r => r.sent && (!lastRemitDate || r.record_date > lastRemitDate));

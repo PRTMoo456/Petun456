@@ -247,14 +247,14 @@ async function loadRemitCard(ctx) {
   // การ์ดนี้อยู่ใต้ส่วนหลักของหน้า จึงโหลดหลังหน้าพร้อมใช้งานแล้วและเก็บผลไว้กับ context เดียวกัน
   if (!ctx.remitDataPromise) {
     ctx.remitDataPromise = supabase.from('cash_remittances')
-      .select('remit_date,amount,method,through_record_date,created_at').eq('branch_id', BRANCH.id)
+      .select('remit_date,amount,method,through_record_date,created_at,received_at,received_amount').eq('branch_id', BRANCH.id)
       .order('created_at', { ascending: false }).limit(1).then(async ({ data: remits, error: remitError }) => {
       if (remitError) throw remitError;
       const cutoff = remits?.[0]?.through_record_date || remits?.[0]?.remit_date || null;
       const { data: recentRecords } = await supabase.from('daily_records').select('record_date,cash,float_cash,sent')
         .eq('branch_id', BRANCH.id).eq('sent', true).gte('record_date', BRANCH.cash_tracking_from || '2000-01-01')
         .order('record_date', { ascending: false });
-      return { cutoff, recentRecords: recentRecords || [] };
+      return { cutoff, last: remits?.[0] || null, recentRecords: recentRecords || [] };
     });
   }
   let data;
@@ -262,19 +262,22 @@ async function loadRemitCard(ctx) {
   catch (error) { el.innerHTML = `<p class="sub">โหลดยอดเงินสดไม่สำเร็จ — ${esc(error.message || 'ลองใหม่อีกครั้ง')}</p>`; return; }
   const p = calc.cashPending(data.recentRecords, data.cutoff);
   const round = isRoundOn(ctx.rounds, TODAY);
+  // ส่งเงินแล้วแต่หัวหน้ายังไม่กดรับ → ขึ้นสถานะรอรับ (ปุ่มส่งหาย กดซ้ำไม่ได้)
+  const waiting = data.last && data.last.method === 'cash' && !data.last.received_at ? data.last : null;
   el.innerHTML = `
     <div class="between" style="margin-bottom:4px">
       <div class="eyebrow">เงินสดค้างส่งหัวหน้า</div>
       <span class="sub">ค้าง ${p.dates.length} วัน</span>
     </div>
     <div class="bigtime">${baht(p.amount)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
-    ${round ? `
-      <p class="sub" style="margin:8px 0 10px">วันนี้หัวหน้ามาส่งของ (${esc(round.name)}) — ส่งเงินสดสะสมให้ด้วย</p>
+    ${waiting ? `<div class="note" style="margin-top:8px">ส่งเงินแล้ว ${baht(waiting.amount)} บาท — <b>รอหัวหน้านับและกดรับ</b></div>` : ''}
+    ${round && p.amount > 0 ? `
+      <p class="sub" style="margin:8px 0 10px">วันนี้หัวหน้ามาส่งของ (${esc(round.name)}) — ส่งเงินสดสะสมให้หัวหน้าแล้วกด "ส่งเงินแล้ว"</p>
       <div class="row" style="gap:8px">
-        <button class="btn primary" data-remit="cash" style="flex:1" ${p.amount <= 0 ? 'disabled' : ''}>ส่งเงินสดแล้ว</button>
-        <button class="btn" data-remit="transfer" style="flex:1" ${p.amount <= 0 ? 'disabled' : ''}>โอนเงินแทน</button>
+        <button class="btn primary" data-remit="cash" style="flex:1">ส่งเงินสดแล้ว</button>
+        <button class="btn" data-remit="transfer" style="flex:1">โอนเงินแทน</button>
       </div>
-    ` : `<p class="sub" style="margin-top:8px">หัวหน้าจะมารับตามรอบส่งของถัดไป${nextRoundText(ctx)}</p>`}
+    ` : round ? '' : `<p class="sub" style="margin-top:8px">หัวหน้าจะมารับตามรอบส่งของถัดไป${nextRoundText(ctx)}</p>`}
   `;
   wireRemitButtons(el, p);
 }
@@ -297,11 +300,11 @@ async function doRemit(method, p) {
   if (todayISO() !== TODAY) { await draw($('#roleRoot')); toast('ข้ามวันแล้ว โหลดข้อมูลวันใหม่ให้แล้ว'); return; }
   const btn = document.querySelector(`[data-remit="${method}"]`);
   if (btn) { btn.disabled = true; btn.textContent = 'กำลังบันทึก…'; }
-  const { error } = await supabase.from('cash_remittances').insert({
-    branch_id: BRANCH.id, remit_date: TODAY, amount: p.amount, method, through_record_date: p.throughDate,
-  });
-  if (error) { if (btn) btn.disabled = false; toast('บันทึกไม่สำเร็จ: ' + error.message); return; }
-  toast((method === 'cash' ? 'บันทึกว่าส่งเงินสดแล้ว ' : 'บันทึกว่าโอนเงินแล้ว ') + baht(p.amount) + ' บาท');
+  // ยอดเงินคิดใหม่ที่ฐานข้อมูล ไม่ใช้เลขบนจอ — กดเบิ้ลก็บันทึกได้ครั้งเดียว
+  const { data, error } = await supabase.rpc('send_branch_cash', { p_branch_id: BRANCH.id, p_method: method });
+  if (error) { if (btn) btn.disabled = false; toast('บันทึกไม่สำเร็จ: ' + error.message); await draw($('#roleRoot')); return; }
+  const amt = data?.amount ?? p.amount;
+  toast((method === 'cash' ? 'ส่งเงินสดแล้ว ' + baht(amt) + ' บาท — รอหัวหน้ากดรับ' : 'บันทึกว่าโอนเงินแล้ว ' + baht(amt) + ' บาท'));
   await draw($('#roleRoot'));
 }
 

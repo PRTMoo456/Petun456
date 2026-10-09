@@ -78,7 +78,7 @@ export function makeDb(TODAY) {
     manual_deliveries: [],
     payroll_employee_history: [], payroll_branch_history: [], payroll_rules_history: [],
     repairs: [{ id: 'rp1', branch_id: 'lnd', repair_date: d(-2), description: 'ซ่อมเครื่องปั่น', cost: 850 }],
-    cash_remittances: [{ id: 'cr1', branch_id: 'lnd', remit_date: d(-4), through_record_date:d(-4), amount: 1200, method: 'cash',created_at:d(-4)+'T10:00:00Z' }],
+    cash_remittances: [{ id: 'cr1', branch_id: 'lnd', remit_date: d(-4), through_record_date:d(-4), amount: 1200, method: 'cash',created_at:d(-4)+'T10:00:00Z', received_amount: 1200, received_at: d(-4)+'T10:05:00Z' }],
     head_remittances: [{ id: 'hr1', remit_date: d(-3), amount: 800, method: 'cash' }],
     day_offs: [{ id: 'do1', off_date: d(3), branch_id: 'bwa' }],
     relief_day_offs: [{ off_date: d(6) }],
@@ -170,6 +170,8 @@ export function makeSupabase(db, log = []) {
     record_store_closure:p=>({id:'closed-'+p.p_branch_id,quota:p.p_reason==='absent'?2:p.p_reason==='approved_leave'?1:0}),
     set_external_sale_paid:p=>{const sale=db.external_sales.find(x=>x.id===p.p_sale_id);if(sale)sale.paid=p.p_paid;return{paid:p.p_paid};},
     update_daily_record:p=>{const row=db.daily_records.find(x=>x.id===p.p_record_id);Object.assign(row,p.p_values);return{id:row.id};},
+    send_branch_cash:p=>{const rm=db.cash_remittances.filter(x=>x.branch_id===p.p_branch_id).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)))[0];const cut=rm?(rm.through_record_date||rm.remit_date):null;const rows=db.daily_records.filter(r=>r.branch_id===p.p_branch_id&&r.sent&&(!cut||r.record_date>cut));const amount=rows.reduce((t,r)=>t+Math.max(0,Number(r.cash)-Number(r.float_cash)),0);if(amount<=0)throw new Error('ส่งเงินไปแล้ว ไม่มียอดค้างส่ง');const through=rows.reduce((m,r)=>!m||r.record_date>m?r.record_date:m,null);const now=new Date().toISOString();const row={id:'cr-'+Math.random().toString(36).slice(2,7),branch_id:p.p_branch_id,remit_date:through,amount,method:p.p_method,through_record_date:through,created_at:now,received_amount:p.p_method==='transfer'?amount:null,received_at:p.p_method==='transfer'?now:null};db.cash_remittances.push(row);return{id:row.id,amount,through_date:through};},
+    receive_branch_cash:p=>{const r=db.cash_remittances.find(x=>x.id===p.p_remit_id);if(!r)throw new Error('ไม่พบรายการส่งเงิน');if(r.received_at)throw new Error('รายการนี้รับเงินไปแล้ว');r.received_amount=p.p_amount;r.received_at=new Date().toISOString();return{received:p.p_amount,sent:r.amount};},
     owner_update_day_off:p=>({cancelled:p.p_cancel,date:p.p_new_date}),
     owner_update_closure:()=>({}),owner_cancel_closure:()=>({cancelled:true}),owner_resolve_recount:()=>({}),
   };

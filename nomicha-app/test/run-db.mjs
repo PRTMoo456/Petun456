@@ -202,6 +202,33 @@ const getRec = async (n) => (await pg.query(`select * from daily_records where b
   console.log('✓ ส่งด่วนวันนี้ — แยกจากรอบ · แก้แล้วไม่ซ้ำ · ตัดสต๊อกถูก · ซ่อมแถวหนองหลุบ 9 ต.ค.');
 }
 
+// ---------- 9. migration 021: ส่งเงิน 2 ขั้น — พนักงานกดส่ง หัวหน้ากดรับ · กดเบิ้ล/พร้อมกันได้ครั้งเดียว ----------
+{
+  const REL = '00000000-0000-0000-0000-00000000000c';
+  await pg.exec(`update branches set cash_tracking_from = business_today() - 30 where id='bdt'; delete from cash_remittances where branch_id='bdt'; delete from daily_records where branch_id='bdt' and record_date > business_today() - 3;
+    insert into daily_records(branch_id, record_date, staff_name, cash, float_cash, sent, closed) values
+      ('bdt', business_today() - 2, 'พนักงานบัณฑิต', 580, 300, true, true),
+      ('bdt', business_today() - 1, 'พนักงานบัณฑิต', 650, 300, true, true);`);
+  const pend = (await pg.query(`select * from branch_cash_pending('bdt')`)).rows[0];
+  const before = Number(pend.amount);
+  const r1 = (await asUser(pg, STAFF, `select send_branch_cash('bdt','cash') r`)).rows[0].r;
+  check('ส่งเงิน: ยอดคิดที่ฐานข้อมูล หักเงินทอนแล้ว', Number(r1.amount) === before && before >= 630, JSON.stringify({ r1, before }));
+  let dup = null; try { await asUser(pg, STAFF, `select send_branch_cash('bdt','cash')`); } catch (e) { dup = e.message; }
+  check('ส่งเงิน: กดซ้ำไม่บันทึกเพิ่ม', !!dup && /ส่งเงินไปแล้ว/.test(dup), dup || 'บันทึกซ้ำได้');
+  const ins = (await pg.query(`select pg_get_expr(polwithcheck, polrelid) q from pg_policy where polname = 'cash_insert'`)).rows[0];
+  check('ส่งเงิน: บันทึกตรงลงตารางได้เฉพาะเจ้าของ', /owner/.test(ins?.q || '') && !/auth_branch/.test(ins?.q || ''), JSON.stringify(ins));
+  let staffRecv = null; try { await asUser(pg, STAFF, `select receive_branch_cash('${r1.id}', 100)`); } catch (e) { staffRecv = e.message; }
+  check('รับเงิน: พนักงานกดรับแทนหัวหน้าไม่ได้', !!staffRecv, 'พนักงานกดรับได้');
+  await asUser(pg, REL, `select receive_branch_cash('${r1.id}', ${before - 300})`);
+  let again = null; try { await asUser(pg, REL, `select receive_branch_cash('${r1.id}', ${before})`); } catch (e) { again = e.message; }
+  const row = (await pg.query(`select amount, received_amount, received_by from cash_remittances where id='${r1.id}'`)).rows[0];
+  check('รับเงิน: เก็บจำนวนที่นับได้จริงแยกจากยอดในแอป', Number(row.received_amount) === before - 300 && Number(row.amount) === before && row.received_by === REL, JSON.stringify(row));
+  check('รับเงิน: รับซ้ำไม่ได้', !!again && /รับเงินไปแล้ว/.test(again), again || 'รับซ้ำได้');
+  const left = Number((await pg.query(`select amount from branch_cash_pending('bdt')`)).rows[0].amount);
+  check('ส่งแล้วยอดค้างสาขาเหลือ 0', left === 0, `เหลือ ${left}`);
+  console.log('✓ ส่งเงิน 2 ขั้น — พนักงานส่ง หัวหน้ารับ · ยอดคิดที่ฐานข้อมูล · กดซ้ำ/รับซ้ำไม่ได้ · เก็บส่วนต่างเงินจริง');
+}
+
 console.log('');
 if (fails.length) { console.log('✗ ไม่ผ่าน ' + fails.length + ' ข้อ:'); fails.forEach(f => console.log('   • ' + f)); }
 else console.log('✓✓ ผ่านทุกข้อ');

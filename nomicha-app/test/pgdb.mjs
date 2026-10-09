@@ -29,7 +29,8 @@ export const MIGRATIONS = ['006_simplify_harden_and_snapshot.sql', '008_day_off_
   '016_manual_deliveries.sql',
   '017_warehouse_min.sql',
   '018_payroll_history.sql',
-  '020_urgent_delivery.sql'];
+  '020_urgent_delivery.sql',
+  '021_cash_send_receive.sql'];
 
 export async function makePg() {
   const pg = new PGlite();

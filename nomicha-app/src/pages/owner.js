@@ -865,23 +865,23 @@ async function renderPay(body) {
     const lastRemitDate = branchRemits[0]?.through_record_date || branchRemits[0]?.remit_date || null;
     const records = (cashRecords || []).filter(r => r.branch_id === b.id && (!b.cash_tracking_from || r.record_date >= b.cash_tracking_from));
     const p = calc.cashPending(records, lastRemitDate);
-    return `<tr><td>${esc(b.name)}</td><td class="n">${baht(p.amount)}</td><td class="n">${p.dates.length}</td><td class="n">${lastRemitDate ? fmtDate(lastRemitDate) : b.cash_tracking_from ? `เริ่ม ${fmtDate(b.cash_tracking_from)}` : '—'}</td></tr>`;
+    const waiting = branchRemits.filter(x => x.method === 'cash' && !x.received_at).reduce((t, x) => t + N(x.amount), 0);
+    return `<tr><td>${esc(b.name)}</td><td class="n">${baht(p.amount)}</td><td class="n">${p.dates.length}</td><td class="n">${waiting ? baht(waiting) : '–'}</td><td class="n">${lastRemitDate ? fmtDate(lastRemitDate) : b.cash_tracking_from ? `เริ่ม ${fmtDate(b.cash_tracking_from)}` : '—'}</td></tr>`;
   }).join('');
  
   const cashStart=BRANCHES.reduce((m,b)=>!m||b.cash_tracking_from>m?b.cash_tracking_from:m,null);
-  const collected = (allRemits || []).filter(x=>x.method==='cash'&&(!cashStart||x.remit_date>=cashStart)).reduce((s, x) => s + N(x.amount), 0);
-  const forwarded = (headRemits || []).filter(x=>!cashStart||x.remit_date>=cashStart).reduce((s, x) => s + N(x.amount), 0);
-  const headHeld = collected - forwarded;
+  const headHeld = calc.headCashHeld(allRemits || [], headRemits || [], cashStart);
   const headLogRows = (headRemits || []).slice().reverse().map(e => `<tr><td class="n">${fmtDate(e.remit_date)}</td><td class="n">${baht(e.amount)}</td><td>${e.method === 'cash' ? 'เงินสด' : 'โอนเงิน'}</td></tr>`).join('');
   // รายการเก็บเงินสดจากแต่ละสาขาที่ยังไม่ถูกส่งให้เจ้าของ (นับตั้งแต่ครั้งล่าสุดที่กด "รับเงินแล้ว") — รวมกันต้องได้เท่ากับ headHeld ข้างบนเป๊ะ
   const lastHeadRemit = (headRemits || []).slice().sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)))[0];
   const lastHeadAt = lastHeadRemit ? String(lastHeadRemit.created_at || lastHeadRemit.remit_date) : null;
   const outstandingCashRemits = (allRemits || [])
-    .filter(x => x.method === 'cash' && (!cashStart || x.remit_date >= cashStart) && (!lastHeadAt || String(x.created_at || x.remit_date) > lastHeadAt))
-    .sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)));
+    .filter(x => x.method === 'cash' && x.received_at && (!cashStart || x.remit_date >= cashStart) && (!lastHeadAt || String(x.received_at) > lastHeadAt))
+    .sort((a, c) => String(c.received_at).localeCompare(String(a.received_at)));
   const headBreakdownRows = outstandingCashRemits.map(r => {
     const b = BRANCHES.find(x => x.id === r.branch_id);
-    return `<tr><td>${esc(b ? b.name : r.branch_id)}</td><td class="n">${fmtDate(r.remit_date)}</td><td class="n">${baht(N(r.amount))}</td></tr>`;
+    const got = N(r.received_amount ?? r.amount), diff = got - N(r.amount);
+    return `<tr><td>${esc(b ? b.name : r.branch_id)}</td><td class="n">${fmtDate(r.remit_date)}</td><td class="n">${baht(got)}${diff ? ` <span class="sub ${diff < 0 ? 'neg' : 'pos'}">(แอป ${baht(N(r.amount))} · ${diff < 0 ? 'ขาด' : 'เกิน'} ${baht(Math.abs(diff))})</span>` : ''}</td></tr>`;
   }).join('');
  
   body.innerHTML = `<div class="between" style="margin-bottom:14px;flex-wrap:wrap;gap:8px"><h3 style="margin:0">เงินเดือน — ${monthLabel(selMonth() + '-01')}</h3>
@@ -901,7 +901,7 @@ async function renderPay(body) {
     ${timeHTML}
 
     <h3 style="margin:22px 0 10px">เงินสดค้างที่สาขา</h3>
-    <div class="tablewrap"><table><thead><tr><th>สาขา</th><th>ค้างส่ง</th><th>ค้างกี่วัน</th><th>ส่ง/รับล่าสุด</th></tr></thead><tbody>${cashRows}</tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>สาขา</th><th>ค้างส่ง</th><th>ค้างกี่วัน</th><th>ส่งแล้ว รอหัวหน้ารับ</th><th>ส่งล่าสุดถึงวันที่</th></tr></thead><tbody>${cashRows}</tbody></table></div>
  
     <h3 style="margin:22px 0 10px">เงินสดจากหัวหน้า</h3>
     <div class="card pad" style="margin-bottom:14px">
@@ -909,7 +909,7 @@ async function renderPay(body) {
         <button class="mini" id="ownerConfirmHeadBtn" ${headHeld <= 0 ? 'disabled' : ''}>รับเงินแล้ว</button></div>
       <div class="bigtime">${baht(headHeld)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
       ${headBreakdownRows ? `<div class="tablewrap" style="margin-top:10px"><table>
-        <thead><tr><th>เก็บจากสาขา</th><th>วันที่เก็บ</th><th>จำนวน</th></tr></thead>
+        <thead><tr><th>เก็บจากสาขา</th><th>วันที่เก็บ</th><th>รับจริง</th></tr></thead>
         <tbody>${headBreakdownRows}</tbody>
         <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td colspan="2">รวม</td><td class="n">${baht(headHeld)}</td></tr></tfoot>
       </table></div>` : ''}
