@@ -308,6 +308,9 @@ if (ownerHTML.pay && ownerHTML.pl) {
       { branch_id:'bwa', remit_date:'2026-10-09', through_record_date:'2026-10-08', amount:4514, method:'cash', created_at:'2026-10-09T06:00:00Z', received_at:'2026-10-09T06:01:00Z', received_amount:4214 },
       { branch_id:'lnd', remit_date:'2026-10-05', through_record_date:'2026-10-06', amount:1, method:'cash', created_at:'2026-10-05T10:00:00Z', received_at:'2026-10-05T10:00:00Z', received_amount:1 }];
     const txt = buildCashSummaryText({ today:'2026-10-09', branches:br, remits:rm, headRemits:[], records:rec });
+    const { previousSlot } = await import('../api/line-cash-summary.js');
+    check('LINE สรุปเงิน: รอบก่อนของศุกร์คือจันทร์ ของจันทร์คือศุกร์', previousSlot('2026-10-09') === '2026-10-05' && previousSlot('2026-10-12') === '2026-10-09', previousSlot('2026-10-09') + ' ' + previousSlot('2026-10-12'));
+    check('LINE สรุปเงิน: ไม่นับรอบก่อนซ้ำ', !/ส่ง 05\/10/.test(txt), txt);
     check('LINE สรุปเงิน: แยกวันตรงซอง', /06\/10  1,990/.test(txt) && /08\/10  1,376/.test(txt) && /ขาด 300/.test(txt), txt);
     check('LINE สรุปเงิน: เตือนสาขาที่ยังไม่ได้เก็บ', /ยังไม่ได้เก็บ/.test(txt) && /【เหล่านาดี】 1,345 บาท · 2 วัน/.test(txt), txt);
   }

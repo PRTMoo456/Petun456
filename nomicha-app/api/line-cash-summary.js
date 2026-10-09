@@ -1,4 +1,5 @@
-// Vercel Cron: สรุปเก็บเงินสดสาขาทุกวันจันทร์ 21:00 เวลาไทย (14:00 UTC) — เจ้าของสั่ง 9 ต.ค. 69
+// Vercel Cron: สรุปเก็บเงินสดสาขาทุกวันจันทร์และศุกร์ 17:00 เวลาไทย (10:00 UTC) — เจ้าของสั่ง 9 ต.ค. 69
+// แต่ละรอบสรุปเฉพาะเงินที่เก็บหลังรายงานครั้งก่อน (จันทร์ 17:00 → ศุกร์ 17:00 → จันทร์ 17:00) ไม่ซ้ำกัน
 // บอกว่าเก็บเงินสาขาไหนแล้ว เก็บเท่าไร เป็นยอดวันไหน วันละเท่าไร · วันไหนยังไม่ได้เก็บ · หัวหน้าถือเงินอยู่เท่าไร
 import { createClient } from '@supabase/supabase-js';
 import { remitLedger, pendingDays, headCashHeld } from '../src/calc.js';
@@ -14,22 +15,35 @@ const addDays = (iso, k) => new Date(Date.parse(iso + 'T00:00:00Z') + k * 864e5)
 const dm = iso => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 const dmy = iso => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 const sum = days => days.reduce((t, d) => t + d.amount, 0);
+const REPORT_DAYS = [1, 5];   // จันทร์ ศุกร์
+const REPORT_HOUR_UTC = 10;   // 17:00 เวลาไทย
+const slotTs = iso => `${iso}T${String(REPORT_HOUR_UTC).padStart(2, '0')}:00:00Z`;
+// รายงานรอบก่อนหน้า = จันทร์/ศุกร์ 17:00 ล่าสุดก่อนวันนี้
+export function previousSlot(today) {
+  for (let k = 1; k <= 7; k++) { const d = addDays(today, -k); if (REPORT_DAYS.includes(new Date(d + 'T00:00:00Z').getUTCDay())) return d; }
+  return addDays(today, -7);
+}
+const bkkHM = ts => new Date(Date.parse(ts) + 7 * 36e5).toISOString().slice(11, 16);
 
 /* สร้างข้อความ — แยกออกมาเพื่อทดสอบได้โดยไม่ต้องต่อฐานข้อมูล/LINE
    branches = [{id,name,cash_tracking_from}] · remits = cash_remittances · headRemits = head_remittances · records = daily_records ที่ส่งแล้ว */
-export function buildCashSummaryText({ today, branches, remits, headRemits, records, days = 7 }) {
-  const start = addDays(today, -(days - 1));
+export function buildCashSummaryText({ today, branches, remits, headRemits, records, startTs, endTs }) {
+  // ช่วงที่สรุป: ตั้งแต่รายงานครั้งก่อน (จันทร์/ศุกร์ 17:00) ถึงตอนนี้
+  const prev = previousSlot(today);
+  startTs = startTs || slotTs(prev);
+  endTs = endTs || slotTs(today);
+  const start = new Date(Date.parse(startTs) + 7 * 36e5).toISOString().slice(0, 10);
   const recs = records.filter(r => { const b = branches.find(x => x.id === r.branch_id); return r.sent && (!b?.cash_tracking_from || r.record_date >= b.cash_tracking_from); });
   const ledger = remitLedger(remits, recs);
   const name = id => (branches.find(b => b.id === id) || {}).name || id;
   const dayRows = ds => ds.map(d => `   ${dm(d.date)}  ${money(d.amount)}`);
-  const out = ['💵 สรุปเก็บเงินสดสาขา', `ประจำวันที่ ${dmy(today)} · ช่วง ${dm(start)}–${dm(today)}`, '━━━━━━━━━━━━━━'];
+  const out = ['💵 สรุปเก็บเงินสดสาขา', `ประจำวันที่ ${dmy(today)}`, `เก็บตั้งแต่ ${dm(start)} ${bkkHM(startTs)} ถึง ${dm(today)} ${bkkHM(endTs)}`, '━━━━━━━━━━━━━━'];
 
   // 1) เก็บแล้วในช่วงนี้
-  const got = ledger.filter(r => String(r.remit_date) >= start && String(r.remit_date) <= today)
+  const got = ledger.filter(r => { const t = Date.parse(r.created_at || (r.remit_date + 'T00:00:00Z')); return t > Date.parse(startTs) && t <= Date.parse(endTs); })
     .sort((a, c) => String(a.created_at || a.remit_date).localeCompare(String(c.created_at || c.remit_date)));
   out.push('✅ เก็บแล้ว');
-  if (!got.length) out.push('   — ไม่มีการเก็บเงินในช่วงนี้ —');
+  if (!got.length) out.push('   — ยังไม่มีการเก็บเงินตั้งแต่รายงานครั้งก่อน —');
   let total = 0;
   got.forEach(r => {
     const recv = r.method === 'transfer' ? n(r.amount) : r.received_at ? n(r.received_amount ?? r.amount) : null;
@@ -84,7 +98,7 @@ async function pushLineMessage(token, groupId, text) {
   if (!response.ok) throw new Error(`LINE returned ${response.status}`);
 }
 
-export async function sendCashSummary({ today = thaiISO(), groupId } = {}) {
+export async function sendCashSummary({ today = thaiISO(), groupId, onDemand = false } = {}) {
   const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
   const [t, b, r, h, d] = await Promise.all([
     groupId ? Promise.resolve({ data: { group_id: groupId }, error: null })
@@ -96,7 +110,11 @@ export async function sendCashSummary({ today = thaiISO(), groupId } = {}) {
   ]);
   if ([t, b, r, h, d].some(x => x.error)) throw new Error('Could not load cash report data');
   if (!t.data?.group_id) throw new Error('LINE group has not been linked yet');
-  const text = buildCashSummaryText({ today, branches: b.data || [], remits: r.data || [], headRemits: h.data || [], records: d.data || [] });
+  // พิมพ์ขอเองในกลุ่ม: สรุปตั้งแต่รายงานรอบล่าสุดที่ส่งไปแล้ว จนถึงตอนนี้
+  const nowTs = new Date().toISOString();
+  const lastSlot = Date.parse(slotTs(today)) <= Date.parse(nowTs) && REPORT_DAYS.includes(new Date(today + 'T00:00:00Z').getUTCDay()) ? today : previousSlot(today);
+  const range = onDemand ? { startTs: slotTs(lastSlot), endTs: nowTs } : {};
+  const text = buildCashSummaryText({ today, branches: b.data || [], remits: r.data || [], headRemits: h.data || [], records: d.data || [], ...range });
   await pushLineMessage(process.env.LINE_CHANNEL_ACCESS_TOKEN, t.data.group_id, text);
   return { today };
 }
