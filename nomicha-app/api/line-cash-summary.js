@@ -46,12 +46,12 @@ export function buildCashSummaryText({ today, branches, remits, headRemits, reco
   if (!got.length) out.push('   — ยังไม่มีการเก็บเงินตั้งแต่รายงานครั้งก่อน —');
   let total = 0;
   got.forEach(r => {
-    const recv = r.method === 'transfer' ? n(r.amount) : r.received_at ? n(r.received_amount ?? r.amount) : null;
+    const recv = r.method === 'transfer' ? n(r.expected) : r.received_at ? n(r.received_amount ?? r.amount) : null;
     if (recv != null) total += recv;
-    const diff = recv != null ? recv - n(r.amount) : 0;
-    const status = r.method === 'transfer' ? `โอนเข้าบัญชี ${money(r.amount)}`
-      : recv == null ? `ส่งแล้ว ${money(r.amount)} · ⏳ หัวหน้ายังไม่กดรับ`
-      : `รับ ${money(recv)}${diff ? ` (แอป ${money(r.amount)} · ${diff < 0 ? 'ขาด' : 'เกิน'} ${money(Math.abs(diff))})` : ''}`;
+    const diff = recv != null ? recv - n(r.expected) : 0;
+    const status = r.method === 'transfer' ? `โอนเข้าบัญชี ${money(r.expected)}`
+      : recv == null ? `ส่งแล้ว ${money(r.expected)} · ⏳ หัวหน้ายังไม่กดรับ`
+      : `รับ ${money(recv)}${diff ? ` (ควรได้ ${money(r.expected)} · ${diff < 0 ? 'ขาด' : 'เกิน'} ${money(Math.abs(diff))})` : ''}`;
     out.push(`【${name(r.branch_id)}】 ส่ง ${dm(String(r.remit_date))} · ${status}`, ...dayRows(r.days), '');
   });
   if (got.length) out.push(`รวมรับแล้ว ${money(total)} บาท`);

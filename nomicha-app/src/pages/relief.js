@@ -591,11 +591,11 @@ async function renderCash(body) {
   const waitingRows = waiting.map(r => `
     <div class="card pad" style="border-left:3px solid var(--amber)">
       <div class="between" style="margin-bottom:2px"><h3>สาขา${esc(bname(r.branch_id))}</h3>
-        <span class="bigtime" style="font-size:20px">${baht(r.amount)} <span class="sub" style="font-size:12px;font-weight:400">บาท</span></span></div>
+        <span class="bigtime" style="font-size:20px">${baht(r.expected)} <span class="sub" style="font-size:12px;font-weight:400">บาท</span></span></div>
       <p class="sub" style="margin:0 0 6px">สาขากดส่งเงินแล้ว ${fmtDate(r.remit_date)} · ยอดวันที่ ${dayRangeText(r.days)}</p>
       <div style="max-width:260px;margin-bottom:10px">${dayLinesHTML(r.days)}</div>
       <label class="whlbl" style="display:block">นับเงินได้จริง (บาท)
-        <input inputmode="decimal" data-recvamt="${r.id}" value="${esc(String(r.amount))}" style="width:100%;margin-top:4px"></label>
+        <input inputmode="decimal" data-recvamt="${r.id}" value="${esc(String(r.expected))}" style="width:100%;margin-top:4px"></label>
       <button class="btn primary" data-recv="${r.id}" style="width:100%;margin-top:10px">รับเงินแล้ว</button>
     </div>`).join('');
   const waitingIds = new Set(waiting.map(r => r.branch_id));
@@ -607,7 +607,7 @@ async function renderCash(body) {
   const since = new Date(Date.parse(TODAY + 'T00:00:00Z') - 14 * 864e5).toISOString().slice(0, 10);
   const hist = ledger.filter(r => r.remit_date >= since).sort((a, c) => String(c.created_at).localeCompare(String(a.created_at)));
   const histRows = hist.map(r => `<tr><td class="n">${fmtDate(r.remit_date)}</td><td>${esc(bname(r.branch_id))}</td>
-      <td class="sub" style="font-size:12px">${dayInlineText(r.days) || '—'}</td><td class="n">${baht(r.amount)}</td><td>${remitStatusHTML(r)}</td></tr>`).join('');
+      <td class="sub" style="font-size:12px">${dayInlineText(r.days) || '—'}</td><td class="n">${baht(r.expected)}</td><td>${remitStatusHTML(r)}</td></tr>`).join('');
   const headLog = (headRemits || []).slice().sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date))).slice(0, 5)
     .map(e => `<tr><td class="n">${fmtDate(e.remit_date)}</td><td class="n">${baht(e.amount)}</td><td>${e.method === 'cash' ? 'ให้เจ้าของ' : 'ฝากธนาคาร'}</td></tr>`).join('');
 
@@ -632,7 +632,7 @@ async function renderCash(body) {
     </div>
     <div class="card pad">
       <div class="eyebrow" style="margin-bottom:6px">ประวัติรับเงินจากสาขา (14 วัน)</div>
-      <div class="tablewrap"><table><thead><tr><th>วันที่ส่ง</th><th>สาขา</th><th>ยอดวันที่</th><th>ยอดในแอป</th><th>สถานะ</th></tr></thead>
+      <div class="tablewrap"><table><thead><tr><th>วันที่ส่ง</th><th>สาขา</th><th>ยอดวันที่</th><th>ควรได้</th><th>สถานะ</th></tr></thead>
         <tbody>${histRows || '<tr><td colspan="5" class="sub">ยังไม่มี</td></tr>'}</tbody></table></div>
       ${headLog ? `<div class="eyebrow" style="margin:12px 0 6px">ส่งต่อให้เจ้าของล่าสุด</div>
         <div class="tablewrap"><table><thead><tr><th>วันที่</th><th>จำนวน</th><th>วิธี</th></tr></thead><tbody>${headLog}</tbody></table></div>` : ''}

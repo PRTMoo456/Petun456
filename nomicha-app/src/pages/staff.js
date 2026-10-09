@@ -286,7 +286,7 @@ async function loadRemitCard(ctx) {
     ` : ''}
     ${ledger.length ? `<div class="eyebrow" style="margin-top:14px">ประวัติส่งเงิน</div>
       ${ledger.map(r => `<div style="border-top:1px solid var(--line);padding:8px 0">
-        <div class="between" style="gap:8px;flex-wrap:wrap"><span><b>${baht(r.amount)}</b> <span class="sub">ส่ง ${fmtDate(r.remit_date)} · ยอดวันที่ ${dayRangeText(r.days)}</span></span>${remitStatusHTML(r)}</div>
+        <div class="between" style="gap:8px;flex-wrap:wrap"><span><b>${baht(r.expected)}</b> <span class="sub">ส่ง ${fmtDate(r.remit_date)} · ยอดวันที่ ${dayRangeText(r.days)}</span></span>${remitStatusHTML(r)}</div>
       </div>`).join('')}` : ''}
   `;
   wireRemitButtons(el, p);

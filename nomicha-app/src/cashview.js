@@ -25,7 +25,8 @@ export function dayRangeText(days) {
 export function remitStatusHTML(r) {
   if (r.method === 'transfer') return '<span class="pill ok">โอนเข้าบัญชี</span>';
   if (!r.received_at) return '<span class="pill warn">รอหัวหน้ารับ</span>';
-  const got = Number(r.received_amount ?? r.amount), diff = got - Number(r.amount);
+  const exp = Number(r.expected ?? r.amount);
+  const got = Number(r.received_amount ?? r.amount), diff = got - exp;
   return `<span class="pill ${diff ? 'bad' : 'ok'}">รับแล้ว ${baht(got)}${diff ? ` · ${diff < 0 ? 'ขาด' : 'เกิน'} ${baht(Math.abs(diff))}` : ''}</span>`;
 }
 

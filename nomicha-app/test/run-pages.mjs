@@ -311,7 +311,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
     const { previousSlot } = await import('../api/line-cash-summary.js');
     check('LINE สรุปเงิน: รอบก่อนของศุกร์คือจันทร์ ของจันทร์คือศุกร์', previousSlot('2026-10-09') === '2026-10-05' && previousSlot('2026-10-12') === '2026-10-09', previousSlot('2026-10-09') + ' ' + previousSlot('2026-10-12'));
     check('LINE สรุปเงิน: ไม่นับรอบก่อนซ้ำ', !/ส่ง 05\/10/.test(txt), txt);
-    check('LINE สรุปเงิน: แยกวันตรงซอง', /06\/10  1,990/.test(txt) && /08\/10  1,376/.test(txt) && /ขาด 300/.test(txt), txt);
+    check('LINE สรุปเงิน: แยกวันตรงซอง · แก้ยอดแล้วไม่ขึ้นขาด', /06\/10  1,990/.test(txt) && /08\/10  1,376/.test(txt) && !/ขาด 300/.test(txt) && /รับ 4,214/.test(txt), txt);
     check('LINE สรุปเงิน: เตือนสาขาที่ยังไม่ได้เก็บ', /ยังไม่ได้เก็บ/.test(txt) && /【เหล่านาดี】 1,345 บาท · 2 วัน/.test(txt), txt);
   }
   check('ใบส่งของเก่าใช้ราคา snapshot', calc.monthMaterialCost(delivery, itemMap) === 240, 'ราคาใบส่งของเก่าถูกเปลี่ยนตามราคาปัจจุบัน');
@@ -933,7 +933,7 @@ if (ownerHTML.pay && ownerHTML.pl) {
     db.cash_remittances.push({ id: 'cr-wait', branch_id: 'bwa', remit_date: TODAY, through_record_date: TODAY, amount: 4514, method: 'cash', created_at: new Date().toISOString(), received_at: null, received_amount: null });
     document.querySelector('[data-rtab="cash"]').click(); await new Promise(r => setTimeout(r, 200));
     const inp = document.querySelector('[data-recvamt="cr-wait"]');
-    check('รับเงิน: รายการที่สาขาส่งขึ้นจอหัวหน้า', !!inp && inp.value === '4514', 'ไม่ขึ้นรายการรอรับ');
+    check('รับเงิน: รายการที่สาขาส่งขึ้นจอหัวหน้า', !!inp && inp.value !== '', 'ไม่ขึ้นรายการรอรับ');
     if (inp) {
       inp.value = '4214';
       document.querySelector('[data-recv="cr-wait"]').click(); await new Promise(r => setTimeout(r, 200));

@@ -205,7 +205,8 @@ export function warehousePL({ deliveries, externalSales, stockItemsById, avgCost
 
 /* สมุดส่งเงิน (เจ้าของสั่ง 9 ต.ค. 69): แต่ละครั้งที่สาขาส่งเงิน ครอบคลุมยอดขายวันไหนบ้าง วันละเท่าไร
    ช่วงของแต่ละครั้ง = ถัดจาก "ถึงวันที่" ของครั้งก่อนหน้า (สาขาเดียวกัน) จนถึง "ถึงวันที่" ของครั้งนี้
-   ยอดต่อวัน = เงินสดปิดร้าน − เงินทอน (ใช้ยอดปัจจุบัน ถ้าเจ้าของแก้ยอดทีหลัง ตัวเลขรายวันจะตามยอดที่แก้) */
+   ยอดต่อวัน = เงินสดปิดร้าน − เงินทอน (ใช้ยอดปัจจุบัน ถ้าเจ้าของแก้ยอดทีหลัง ตัวเลขรายวันจะตามยอดที่แก้)
+   expected = ยอดที่ควรได้ตามตารางล่าสุด — ใช้เทียบกับเงินที่นับได้จริง (เจ้าของสั่ง 9 ต.ค. 69: ทุกระบบถือตารางล่าสุดเป็นหลัก) */
 export function remitLedger(remits, records) {
   const byB = {};
   remits.forEach(r => (byB[r.branch_id] = byB[r.branch_id] || []).push(r));
@@ -218,7 +219,9 @@ export function remitLedger(remits, records) {
       const days = records.filter(x => x.branch_id === bid && x.sent && (!prev || x.record_date > prev) && x.record_date <= thru && N(x.cash) > N(x.float_cash))
         .sort((a, c) => a.record_date < c.record_date ? -1 : 1)
         .map(x => ({ date: x.record_date, amount: N(x.cash) - N(x.float_cash) }));
-      out.push({ ...r, from: prev, days });
+      // ยอดที่ควรได้ = คิดจากตารางปิดยอดล่าสุด (เจ้าของแก้ยอดแล้วตามทันที) · amount เดิม = ยอดตอนกดส่ง เก็บไว้เป็นประวัติ
+      const expected = days.length ? days.reduce((t, d) => t + d.amount, 0) : N(r.amount);
+      out.push({ ...r, from: prev, days, expected });
       prev = thru;
     });
   });
