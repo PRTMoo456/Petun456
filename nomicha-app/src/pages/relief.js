@@ -10,6 +10,7 @@ import { defaultDraft, closeFormHTML, validateClose, submitClose, CLOSE_REASON_O
 import { verifyForClock } from '../geo.js';
 import { whAvailMap, issueExternalSale, recordPurchase, purchaseQtyLabel, purchaseUnits, qtyField } from '../warehouse.js';
 import * as calc from '../calc.js';
+import { dayLinesHTML, dayRangeText, dayInlineText, remitStatusHTML } from '../cashview.js';
 
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
 let tabLoadTicket = 0;
@@ -557,59 +558,86 @@ async function doSubmitExternalSale(avail) {
 async function renderCash(body) {
   body.innerHTML = `<div class="stack" id="cashBox"><div class="boot">กำลังโหลด…</div></div>`;
   const round = isRoundOn(TODAY);
-  const [{ data: allRemits }, { data: headRemits }] = await Promise.all([
+  const cashStart = BRANCHES.reduce((m, b) => !m || (b.cash_tracking_from && b.cash_tracking_from < m) ? b.cash_tracking_from : m, null);
+  const [{ data: allRemits }, { data: headRemits }, { data: records }] = await Promise.all([
     supabase.from('cash_remittances').select('*'),
     supabase.from('head_remittances').select('*'),
+    supabase.from('daily_records').select('branch_id,record_date,cash,float_cash,sent').eq('sent', true).gte('record_date', cashStart || '2000-01-01'),
   ]);
-  const list = await Promise.all(BRANCHES.map(async b => {
-    const branchRemits = (allRemits || []).filter(x => x.branch_id === b.id)
-      .sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)));
-    const cutoff = branchRemits[0]?.through_record_date || branchRemits[0]?.remit_date || null;
-    const { data: records } = await supabase.from('daily_records').select('record_date,cash,float_cash,sent').eq('branch_id', b.id).eq('sent', true)
-      .gte('record_date', b.cash_tracking_from || '2000-01-01').order('record_date', { ascending: false });
-    const p = calc.cashPending(records || [], cutoff);
-    return { b, p, isToday: !!(round && round.branch_ids.includes(b.id)) };
-  }));
-  const cashStart=BRANCHES.reduce((m,b)=>!m||b.cash_tracking_from>m?b.cash_tracking_from:m,null);
-  const held = calc.headCashHeld(allRemits || [], headRemits || [], cashStart);
-  // สาขากดส่งเงินแล้ว รอหัวหน้านับและกดรับ (เหมือนสาขาเช็ครับของ แต่กลับทาง)
-  const waiting = (allRemits || []).filter(x => x.method === 'cash' && !x.received_at)
-    .sort((a, c) => String(a.created_at).localeCompare(String(c.created_at)));
+  const recs = (records || []).filter(r => { const b = BRANCHES.find(x => x.id === r.branch_id); return !b?.cash_tracking_from || r.record_date >= b.cash_tracking_from; });
+  const ledger = calc.remitLedger(allRemits || [], recs);
   const bname = id => (BRANCHES.find(x => x.id === id) || {}).name || id;
+
+  // ยอดค้างที่สาขา แยกรายวัน
+  const list = BRANCHES.map(b => {
+    const mine = ledger.filter(x => x.branch_id === b.id).sort((a, c) => String(c.created_at).localeCompare(String(a.created_at)));
+    const cutoff = mine[0] ? (mine[0].through_record_date || mine[0].remit_date) : null;
+    const days = calc.pendingDays(recs.filter(r => r.branch_id === b.id), cutoff);
+    return { b, days, amount: days.reduce((t, d) => t + d.amount, 0), isToday: !!(round && round.branch_ids.includes(b.id)) };
+  });
+
+  // เงินที่หัวหน้าถืออยู่ = รับจากสาขาแล้ว ยังไม่ได้ส่งต่อให้เจ้าของ (นับหลังครั้งล่าสุดที่ส่งให้เจ้าของ)
+  const cashStartMax = BRANCHES.reduce((m, b) => !m || b.cash_tracking_from > m ? b.cash_tracking_from : m, null);
+  const held = calc.headCashHeld(allRemits || [], headRemits || [], cashStartMax);
+  const lastHead = (headRemits || []).slice().sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)))[0];
+  const lastHeadAt = lastHead ? String(lastHead.created_at || lastHead.remit_date) : null;
+  const holding = ledger.filter(r => r.method === 'cash' && r.received_at && (!lastHeadAt || String(r.received_at) > lastHeadAt))
+    .sort((a, c) => String(a.received_at).localeCompare(String(c.received_at)));
+  const holdingRows = holding.map(r => `<tr><td>${esc(bname(r.branch_id))}<div class="sub">รับ ${fmtDate(String(r.received_at).slice(0, 10))}</div></td>
+      <td>${dayLinesHTML(r.days)}</td><td class="n"><b>${baht(N(r.received_amount ?? r.amount))}</b></td></tr>`).join('');
+
+  // สาขากดส่งเงินแล้ว รอหัวหน้านับและกดรับ
+  const waiting = ledger.filter(x => x.method === 'cash' && !x.received_at).sort((a, c) => String(a.created_at).localeCompare(String(c.created_at)));
   const waitingRows = waiting.map(r => `
     <div class="card pad" style="border-left:3px solid var(--amber)">
       <div class="between" style="margin-bottom:2px"><h3>สาขา${esc(bname(r.branch_id))}</h3>
         <span class="bigtime" style="font-size:20px">${baht(r.amount)} <span class="sub" style="font-size:12px;font-weight:400">บาท</span></span></div>
-      <p class="sub" style="margin:0 0 10px">สาขากดส่งเงินแล้ว ${fmtDate(r.remit_date)} · ยอดถึงวันที่ ${r.through_record_date ? fmtDate(r.through_record_date) : '—'}</p>
+      <p class="sub" style="margin:0 0 6px">สาขากดส่งเงินแล้ว ${fmtDate(r.remit_date)} · ยอดวันที่ ${dayRangeText(r.days)}</p>
+      <div style="max-width:260px;margin-bottom:10px">${dayLinesHTML(r.days)}</div>
       <label class="whlbl" style="display:block">นับเงินได้จริง (บาท)
         <input inputmode="decimal" data-recvamt="${r.id}" value="${esc(String(r.amount))}" style="width:100%;margin-top:4px"></label>
       <button class="btn primary" data-recv="${r.id}" style="width:100%;margin-top:10px">รับเงินแล้ว</button>
     </div>`).join('');
   const waitingIds = new Set(waiting.map(r => r.branch_id));
-  const rowsToday = list.filter(x => x.isToday && !waitingIds.has(x.b.id)).map(({ b, p }) => `
-    <div class="card pad">
-      <div class="between" style="margin-bottom:2px"><h3>สาขา${esc(b.name)}</h3>
-        <span class="bigtime" style="font-size:20px">${baht(p.amount)} <span class="sub" style="font-size:12px;font-weight:400">บาท</span></span></div>
-      <p class="sub" style="margin:0">${p.amount > 0 ? `ค้างสะสม ${p.dates.length} วัน — ${p.dates.map(fmtDate).join(' · ')} · <b>รอพนักงานกด "ส่งเงิน" ที่เครื่องสาขา</b>` : 'ไม่มีเงินค้างส่ง'}</p>
-    </div>`).join('');
+  const branchRows = list.map(({ b, days, amount, isToday }) => `<tr>
+      <td>${esc(b.name)}${isToday ? ' <span class="pill warn" style="font-size:11px">รอบวันนี้</span>' : ''}${waitingIds.has(b.id) ? '<div class="sub">ส่งแล้ว รอรับ ↑</div>' : ''}</td>
+      <td>${dayLinesHTML(days)}</td><td class="n"><b>${amount ? baht(amount) : '–'}</b></td></tr>`).join('');
+
+  // ประวัติรับเงิน 14 วันล่าสุด
+  const since = new Date(Date.parse(TODAY + 'T00:00:00Z') - 14 * 864e5).toISOString().slice(0, 10);
+  const hist = ledger.filter(r => r.remit_date >= since).sort((a, c) => String(c.created_at).localeCompare(String(a.created_at)));
+  const histRows = hist.map(r => `<tr><td class="n">${fmtDate(r.remit_date)}</td><td>${esc(bname(r.branch_id))}</td>
+      <td class="sub" style="font-size:12px">${dayInlineText(r.days) || '—'}</td><td class="n">${baht(r.amount)}</td><td>${remitStatusHTML(r)}</td></tr>`).join('');
+  const headLog = (headRemits || []).slice().sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date))).slice(0, 5)
+    .map(e => `<tr><td class="n">${fmtDate(e.remit_date)}</td><td class="n">${baht(e.amount)}</td><td>${e.method === 'cash' ? 'ให้เจ้าของ' : 'ฝากธนาคาร'}</td></tr>`).join('');
 
   const box = $('#cashBox');
   box.innerHTML = `
     <div class="card pad">
-      <div class="between" style="margin-bottom:4px"><div class="eyebrow">เงินสดที่ถืออยู่</div><span class="sub">รวมเฉพาะที่กดรับแล้ว</span></div>
+      <div class="between" style="margin-bottom:4px"><div class="eyebrow">เงินสดที่ถืออยู่</div><span class="sub">รับแล้ว ยังไม่ได้ส่งเจ้าของ</span></div>
       <div class="bigtime">${baht(held)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
-      <p class="sub" style="margin:8px 0 10px">ส่งให้เจ้าของได้ทุกเมื่อ ไม่ต้องรอครบรอบ</p>
-      <div class="row" style="gap:8px">
+      ${holdingRows ? `<div class="tablewrap" style="margin-top:10px"><table>
+        <thead><tr><th>สาขา</th><th>ยอดวันที่</th><th>รับจริง</th></tr></thead><tbody>${holdingRows}</tbody>
+        <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td colspan="2">รวม</td><td class="n">${baht(held)}</td></tr></tfoot></table></div>` : ''}
+      <div class="row" style="gap:8px;margin-top:10px">
         <button class="btn primary" id="headRemitCash" style="flex:1" ${held <= 0 ? 'disabled' : ''}>ส่งให้เจ้าของแล้ว</button>
         <button class="btn" id="headRemitTransfer" style="flex:1" ${held <= 0 ? 'disabled' : ''}>ฝากธนาคารแล้ว</button>
       </div>
     </div>
     ${waiting.length ? `<div class="eyebrow" style="margin-top:4px">รอรับเงิน (${waiting.length})</div>${waitingRows}` : ''}
-    ${round ? `<div class="card pad" style="border-left:3px solid var(--amber)">
-      <div class="eyebrow">วันนี้เป็นวันเก็บเงินสด — ${esc(round.name)}</div>
-      <div class="sub" style="margin-top:2px">${round.branch_ids.map(id => bname(id)).join(' · ')}</div>
-    </div>${rowsToday}` : (waiting.length ? '' : `<div class="card pad"><p class="sub" style="margin:0">วันนี้ไม่ใช่วันรับเงินสดของสาขาไหนเลย</p></div>`)}
-    <p class="foot">พนักงานกด "ส่งเงิน" ที่เครื่องสาขา → รายการขึ้นที่นี่ → นับเงินจริง ใส่จำนวนที่ได้ แล้วกด "รับเงินแล้ว" · ถ้าเงินไม่ตรงกับยอดในแอป ให้ใส่ตามที่นับได้จริง เจ้าของจะเห็นส่วนต่าง</p>
+    <div class="card pad">
+      <div class="eyebrow" style="margin-bottom:6px">เงินสดค้างที่สาขา (ยังไม่ได้ส่ง)</div>
+      <div class="tablewrap"><table><thead><tr><th>สาขา</th><th>ยอดวันที่</th><th>รวม</th></tr></thead><tbody>${branchRows}</tbody></table></div>
+      <p class="sub" style="margin:8px 0 0;font-size:12px">${round ? `วันนี้ ${esc(round.name)} — ไปรับเงินที่สาขา ให้พนักงานกด "ส่งเงินสดแล้ว" ที่เครื่องสาขา แล้วรายการจะขึ้นด้านบนให้กดรับ` : 'พนักงานกด "ส่งเงินสดแล้ว" ที่เครื่องสาขา แล้วรายการจะขึ้นด้านบนให้กดรับ'}</p>
+    </div>
+    <div class="card pad">
+      <div class="eyebrow" style="margin-bottom:6px">ประวัติรับเงินจากสาขา (14 วัน)</div>
+      <div class="tablewrap"><table><thead><tr><th>วันที่ส่ง</th><th>สาขา</th><th>ยอดวันที่</th><th>ยอดในแอป</th><th>สถานะ</th></tr></thead>
+        <tbody>${histRows || '<tr><td colspan="5" class="sub">ยังไม่มี</td></tr>'}</tbody></table></div>
+      ${headLog ? `<div class="eyebrow" style="margin:12px 0 6px">ส่งต่อให้เจ้าของล่าสุด</div>
+        <div class="tablewrap"><table><thead><tr><th>วันที่</th><th>จำนวน</th><th>วิธี</th></tr></thead><tbody>${headLog}</tbody></table></div>` : ''}
+    </div>
+    <p class="foot">ยอดต่อวัน = เงินสดตอนปิดร้าน − เงินทอน · ถ้าเงินที่นับได้ไม่ตรงกับยอดในแอป ให้ใส่ตามที่นับได้จริง เจ้าของจะเห็นส่วนต่าง</p>
   `;
   box.querySelectorAll('[data-recv]').forEach(btn => btn.addEventListener('click', () => doReceive(btn.dataset.recv, btn)));
   const hc = $('#headRemitCash'); if (hc) hc.addEventListener('click', () => doHeadRemit('cash', held));

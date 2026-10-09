@@ -203,6 +203,35 @@ export function warehousePL({ deliveries, externalSales, stockItemsById, avgCost
   return { sales, cost, materialMargin: sales - cost, headLabor, net: sales - cost - headLabor };
 }
 
+/* สมุดส่งเงิน (เจ้าของสั่ง 9 ต.ค. 69): แต่ละครั้งที่สาขาส่งเงิน ครอบคลุมยอดขายวันไหนบ้าง วันละเท่าไร
+   ช่วงของแต่ละครั้ง = ถัดจาก "ถึงวันที่" ของครั้งก่อนหน้า (สาขาเดียวกัน) จนถึง "ถึงวันที่" ของครั้งนี้
+   ยอดต่อวัน = เงินสดปิดร้าน − เงินทอน (ใช้ยอดปัจจุบัน ถ้าเจ้าของแก้ยอดทีหลัง ตัวเลขรายวันจะตามยอดที่แก้) */
+export function remitLedger(remits, records) {
+  const byB = {};
+  remits.forEach(r => (byB[r.branch_id] = byB[r.branch_id] || []).push(r));
+  const out = [];
+  Object.entries(byB).forEach(([bid, list]) => {
+    list.sort((a, c) => String(a.created_at || a.remit_date).localeCompare(String(c.created_at || c.remit_date)));
+    let prev = null;
+    list.forEach(r => {
+      const thru = r.through_record_date || r.remit_date;
+      const days = records.filter(x => x.branch_id === bid && x.sent && (!prev || x.record_date > prev) && x.record_date <= thru && N(x.cash) > N(x.float_cash))
+        .sort((a, c) => a.record_date < c.record_date ? -1 : 1)
+        .map(x => ({ date: x.record_date, amount: N(x.cash) - N(x.float_cash) }));
+      out.push({ ...r, from: prev, days });
+      prev = thru;
+    });
+  });
+  return out;
+}
+
+// ยอดค้างที่สาขายังไม่ได้ส่ง แยกรายวัน
+export function pendingDays(records, lastThrough) {
+  return records.filter(x => x.sent && (!lastThrough || x.record_date > lastThrough) && N(x.cash) > N(x.float_cash))
+    .sort((a, c) => a.record_date < c.record_date ? -1 : 1)
+    .map(x => ({ date: x.record_date, amount: N(x.cash) - N(x.float_cash) }));
+}
+
 // เงินสดที่หัวหน้าถืออยู่ = เงินสดที่หัวหน้ากดรับจากสาขาแล้ว (ตามจำนวนที่นับได้จริง) − ที่ส่งต่อให้เจ้าของแล้ว
 export function headCashHeld(cashRemits, headRemits, cashStart) {
   const inRange = d => !cashStart || d >= cashStart;

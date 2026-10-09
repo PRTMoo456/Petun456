@@ -9,6 +9,7 @@
 // พนักงานแก้ยอดที่ส่งแล้วได้ภายในวันเดียวกัน ทุกครั้งเก็บประวัติ ส่วนวันย้อนหลังให้เจ้าของแก้เท่านั้น
 import { supabase } from '../supabaseClient.js';
 import { loadRefs } from '../refs.js';
+import { dayLinesHTML, dayRangeText, remitStatusHTML } from '../cashview.js';
 import { getSettings, payrollSettingsAt } from '../settings.js';
 import { $, N, numIn, numIn0, baht, esc, toast, todayISO, nowHM, fmtDate, monthKey, monthLabel, monthDates } from '../util.js';
 import { quotaReport, dayChip, OFF_LEGEND, quotaHTML, futureDates, LEAVE_MIN_DAYS, LEAVE_MAX_DAYS, LEAVE_WINDOW_TEXT, firstBookable } from '../dayoff.js';
@@ -246,38 +247,47 @@ async function loadRemitCard(ctx) {
   const el = $('#remitCard'); if (!el) return;
   // การ์ดนี้อยู่ใต้ส่วนหลักของหน้า จึงโหลดหลังหน้าพร้อมใช้งานแล้วและเก็บผลไว้กับ context เดียวกัน
   if (!ctx.remitDataPromise) {
-    ctx.remitDataPromise = supabase.from('cash_remittances')
-      .select('remit_date,amount,method,through_record_date,created_at,received_at,received_amount').eq('branch_id', BRANCH.id)
-      .order('created_at', { ascending: false }).limit(1).then(async ({ data: remits, error: remitError }) => {
+    ctx.remitDataPromise = Promise.all([
+      supabase.from('cash_remittances')
+        .select('branch_id,remit_date,amount,method,through_record_date,created_at,received_at,received_amount').eq('branch_id', BRANCH.id)
+        .order('created_at', { ascending: false }),
+      supabase.from('daily_records').select('branch_id,record_date,cash,float_cash,sent')
+        .eq('branch_id', BRANCH.id).eq('sent', true).gte('record_date', BRANCH.cash_tracking_from || '2000-01-01')
+        .order('record_date', { ascending: false }),
+    ]).then(([{ data: remits, error: remitError }, { data: recentRecords }]) => {
       if (remitError) throw remitError;
       const cutoff = remits?.[0]?.through_record_date || remits?.[0]?.remit_date || null;
-      const { data: recentRecords } = await supabase.from('daily_records').select('record_date,cash,float_cash,sent')
-        .eq('branch_id', BRANCH.id).eq('sent', true).gte('record_date', BRANCH.cash_tracking_from || '2000-01-01')
-        .order('record_date', { ascending: false });
-      return { cutoff, last: remits?.[0] || null, recentRecords: recentRecords || [] };
+      return { cutoff, remits: remits || [], recentRecords: recentRecords || [] };
     });
   }
   let data;
   try { data = await ctx.remitDataPromise; }
   catch (error) { el.innerHTML = `<p class="sub">โหลดยอดเงินสดไม่สำเร็จ — ${esc(error.message || 'ลองใหม่อีกครั้ง')}</p>`; return; }
   const p = calc.cashPending(data.recentRecords, data.cutoff);
+  const days = calc.pendingDays(data.recentRecords, data.cutoff);
   const round = isRoundOn(ctx.rounds, TODAY);
-  // ส่งเงินแล้วแต่หัวหน้ายังไม่กดรับ → ขึ้นสถานะรอรับ (ปุ่มส่งหาย กดซ้ำไม่ได้)
-  const waiting = data.last && data.last.method === 'cash' && !data.last.received_at ? data.last : null;
+  const ledger = calc.remitLedger(data.remits, data.recentRecords)
+    .sort((a, c) => String(c.created_at).localeCompare(String(a.created_at))).slice(0, 5);
   el.innerHTML = `
     <div class="between" style="margin-bottom:4px">
       <div class="eyebrow">เงินสดค้างส่งหัวหน้า</div>
-      <span class="sub">ค้าง ${p.dates.length} วัน</span>
+      <span class="sub">ค้าง ${days.length} วัน</span>
     </div>
     <div class="bigtime">${baht(p.amount)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
-    ${waiting ? `<div class="note" style="margin-top:8px">ส่งเงินแล้ว ${baht(waiting.amount)} บาท — <b>รอหัวหน้านับและกดรับ</b></div>` : ''}
-    ${round && p.amount > 0 ? `
-      <p class="sub" style="margin:8px 0 10px">วันนี้หัวหน้ามาส่งของ (${esc(round.name)}) — ส่งเงินสดสะสมให้หัวหน้าแล้วกด "ส่งเงินแล้ว"</p>
+    ${days.length ? `<div style="margin:8px 0 4px;max-width:260px">${dayLinesHTML(days)}</div>
+      <p class="sub" style="margin:2px 0 0;font-size:12px">ยอดต่อวัน = เงินสดตอนปิดร้าน − เงินทอน · เขียนรายการนี้แปะซองได้เลย</p>` : ''}
+    ${p.amount > 0 ? `
+      <p class="sub" style="margin:10px 0 10px">${round ? `วันนี้หัวหน้ามาส่งของ (${esc(round.name)}) — ` : ''}ยื่นเงินให้หัวหน้าแล้วกด "ส่งเงินสดแล้ว" รายการจะไปขึ้นที่จอหัวหน้าให้นับและกดรับ</p>
       <div class="row" style="gap:8px">
         <button class="btn primary" data-remit="cash" style="flex:1">ส่งเงินสดแล้ว</button>
         <button class="btn" data-remit="transfer" style="flex:1">โอนเงินแทน</button>
       </div>
-    ` : round ? '' : `<p class="sub" style="margin-top:8px">หัวหน้าจะมารับตามรอบส่งของถัดไป${nextRoundText(ctx)}</p>`}
+      ${round ? '' : `<p class="sub" style="margin-top:8px">หัวหน้าจะมารับตามรอบส่งของถัดไป${nextRoundText(ctx)}</p>`}
+    ` : ''}
+    ${ledger.length ? `<div class="eyebrow" style="margin-top:14px">ประวัติส่งเงิน</div>
+      ${ledger.map(r => `<div style="border-top:1px solid var(--line);padding:8px 0">
+        <div class="between" style="gap:8px;flex-wrap:wrap"><span><b>${baht(r.amount)}</b> <span class="sub">ส่ง ${fmtDate(r.remit_date)} · ยอดวันที่ ${dayRangeText(r.days)}</span></span>${remitStatusHTML(r)}</div>
+      </div>`).join('')}` : ''}
   `;
   wireRemitButtons(el, p);
 }

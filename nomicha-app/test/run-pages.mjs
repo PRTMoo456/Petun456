@@ -291,6 +291,15 @@ if (ownerHTML.pay && ownerHTML.pl) {
   check('ค่าคอมวันเก่าใช้ snapshot', Math.abs(c.grabCommission - 32.1) < 0.001, `ควรได้ 32.10 แต่ได้ ${c.grabCommission}`);
   const itemMap = { 2: { branch_price: 999 } };
   const delivery = [{ items: { 2: 2 }, price_snapshot: { 2: 120 }, cost_snapshot: { 2: 80 } }];
+  {
+    const recs = [['2026-10-05',1580],['2026-10-06',2290],['2026-10-07',1148],['2026-10-08',1676]].map(([d,c]) => ({ branch_id:'bwa', record_date:d, cash:c, float_cash:300, sent:true }));
+    const rm = [{ branch_id:'bwa', remit_date:'2026-10-05', through_record_date:'2026-10-05', amount:1280, created_at:'2026-10-05T12:00:00Z' },
+                { branch_id:'bwa', remit_date:'2026-10-09', through_record_date:'2026-10-08', amount:4514, created_at:'2026-10-09T06:00:00Z' }];
+    const led = calc.remitLedger(rm, recs);
+    const last = led.find(x => x.remit_date === '2026-10-09');
+    check('สมุดส่งเงิน: แยกวันได้ตรงกับซองบ้านหว้า', JSON.stringify(last.days.map(d => d.amount)) === '[1990,848,1376]' && last.days[0].date === '2026-10-06', JSON.stringify(last.days));
+    check('ยอดค้างแยกวัน', calc.pendingDays(recs, '2026-10-06').length === 2, 'นับวันผิด');
+  }
   check('ใบส่งของเก่าใช้ราคา snapshot', calc.monthMaterialCost(delivery, itemMap) === 240, 'ราคาใบส่งของเก่าถูกเปลี่ยนตามราคาปัจจุบัน');
   const wh = calc.warehousePL({ deliveries: delivery, externalSales: [], stockItemsById: itemMap,
     avgCostById: { 2: 500 }, reliefPayroll: { total: 0 } });

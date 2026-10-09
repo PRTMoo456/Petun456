@@ -10,6 +10,7 @@ import { loadPeople, peopleCardHTML, bindPeopleCard } from './people.js';
 import { getCompanies, deliveryReportHTML, deliveryMonthHTML, externalBillHTML, externalMonthHTML, staffSlipHTML, reliefSlipHTML, printDoc } from '../print.js';
 import { CLOSE_REASON_OPTIONS, closeStore, closeFormHTML, defaultDraft, draftFromRecord, validateClose, submitClose, updateClose, updateClosure, cancelClosure } from '../close.js';
 import * as calc from '../calc.js';
+import { dayLinesHTML, dayInlineText, remitStatusHTML } from '../cashview.js';
  
 let ME, TODAY, STOCK_ITEMS = [], BRANCHES = [], ROUNDS = [];
 let monthPayrollCache = null;
@@ -859,30 +860,37 @@ async function renderPay(body) {
  
   const salaryTotal = payPeople.reduce((s, p) => s + p.pr.total, prR.total);
  
+  // สมุดส่งเงิน: แต่ละครั้งที่สาขาส่ง ครอบคลุมยอดวันไหน วันละเท่าไร (เจ้าของสั่ง 9 ต.ค. 69)
+  const cashRecs = (cashRecords || []).filter(r => { const b = BRANCHES.find(x => x.id === r.branch_id); return !b?.cash_tracking_from || r.record_date >= b.cash_tracking_from; });
+  const ledger = calc.remitLedger(allRemits || [], cashRecs);
+  const bnameOf = id => (BRANCHES.find(x => x.id === id) || {}).name || id;
   const cashRows = BRANCHES.map(b => {
-    const branchRemits = (allRemits || []).filter(x => x.branch_id === b.id)
-      .sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)));
-    const lastRemitDate = branchRemits[0]?.through_record_date || branchRemits[0]?.remit_date || null;
-    const records = (cashRecords || []).filter(r => r.branch_id === b.id && (!b.cash_tracking_from || r.record_date >= b.cash_tracking_from));
-    const p = calc.cashPending(records, lastRemitDate);
-    const waiting = branchRemits.filter(x => x.method === 'cash' && !x.received_at).reduce((t, x) => t + N(x.amount), 0);
-    return `<tr><td>${esc(b.name)}</td><td class="n">${baht(p.amount)}</td><td class="n">${p.dates.length}</td><td class="n">${waiting ? baht(waiting) : '–'}</td><td class="n">${lastRemitDate ? fmtDate(lastRemitDate) : b.cash_tracking_from ? `เริ่ม ${fmtDate(b.cash_tracking_from)}` : '—'}</td></tr>`;
+    const mine = ledger.filter(x => x.branch_id === b.id).sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)));
+    const lastRemitDate = mine[0]?.through_record_date || mine[0]?.remit_date || null;
+    const days = calc.pendingDays(cashRecs.filter(r => r.branch_id === b.id), lastRemitDate);
+    const amount = days.reduce((t, d) => t + d.amount, 0);
+    const waiting = mine.filter(x => x.method === 'cash' && !x.received_at).reduce((t, x) => t + N(x.amount), 0);
+    return `<tr><td>${esc(b.name)}</td><td>${dayLinesHTML(days)}</td><td class="n"><b>${baht(amount)}</b></td><td class="n">${waiting ? baht(waiting) : '–'}</td><td class="n">${lastRemitDate ? fmtDate(lastRemitDate) : b.cash_tracking_from ? `เริ่ม ${fmtDate(b.cash_tracking_from)}` : '—'}</td></tr>`;
   }).join('');
  
   const cashStart=BRANCHES.reduce((m,b)=>!m||b.cash_tracking_from>m?b.cash_tracking_from:m,null);
   const headHeld = calc.headCashHeld(allRemits || [], headRemits || [], cashStart);
   const headLogRows = (headRemits || []).slice().reverse().map(e => `<tr><td class="n">${fmtDate(e.remit_date)}</td><td class="n">${baht(e.amount)}</td><td>${e.method === 'cash' ? 'เงินสด' : 'โอนเงิน'}</td></tr>`).join('');
-  // รายการเก็บเงินสดจากแต่ละสาขาที่ยังไม่ถูกส่งให้เจ้าของ (นับตั้งแต่ครั้งล่าสุดที่กด "รับเงินแล้ว") — รวมกันต้องได้เท่ากับ headHeld ข้างบนเป๊ะ
+  // เงินที่หัวหน้าถืออยู่ แยกตามครั้งที่รับ + ยอดวันไหน — รวมกันต้องได้เท่ากับ headHeld
   const lastHeadRemit = (headRemits || []).slice().sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)))[0];
   const lastHeadAt = lastHeadRemit ? String(lastHeadRemit.created_at || lastHeadRemit.remit_date) : null;
-  const outstandingCashRemits = (allRemits || [])
+  const outstandingCashRemits = ledger
     .filter(x => x.method === 'cash' && x.received_at && (!cashStart || x.remit_date >= cashStart) && (!lastHeadAt || String(x.received_at) > lastHeadAt))
-    .sort((a, c) => String(c.received_at).localeCompare(String(a.received_at)));
+    .sort((a, c) => String(a.received_at).localeCompare(String(c.received_at)));
   const headBreakdownRows = outstandingCashRemits.map(r => {
-    const b = BRANCHES.find(x => x.id === r.branch_id);
     const got = N(r.received_amount ?? r.amount), diff = got - N(r.amount);
-    return `<tr><td>${esc(b ? b.name : r.branch_id)}</td><td class="n">${fmtDate(r.remit_date)}</td><td class="n">${baht(got)}${diff ? ` <span class="sub ${diff < 0 ? 'neg' : 'pos'}">(แอป ${baht(N(r.amount))} · ${diff < 0 ? 'ขาด' : 'เกิน'} ${baht(Math.abs(diff))})</span>` : ''}</td></tr>`;
+    return `<tr><td>${esc(bnameOf(r.branch_id))}<div class="sub">รับ ${fmtDate(String(r.received_at).slice(0, 10))}</div></td><td>${dayLinesHTML(r.days)}</td><td class="n">${baht(got)}${diff ? ` <div class="sub ${diff < 0 ? 'neg' : 'pos'}">(แอป ${baht(N(r.amount))} · ${diff < 0 ? 'ขาด' : 'เกิน'} ${baht(Math.abs(diff))})</div>` : ''}</td></tr>`;
   }).join('');
+  // ประวัติส่งเงินจากสาขาในเดือนที่เลือก
+  const mk = selMonth();
+  const remitHistRows = ledger.filter(r => String(r.remit_date).slice(0, 7) === mk)
+    .sort((a, c) => String(c.created_at || c.remit_date).localeCompare(String(a.created_at || a.remit_date)))
+    .map(r => `<tr><td class="n">${fmtDate(r.remit_date)}</td><td>${esc(bnameOf(r.branch_id))}</td><td class="sub" style="font-size:12px">${dayInlineText(r.days) || '—'}</td><td class="n">${baht(r.amount)}</td><td>${remitStatusHTML(r)}</td></tr>`).join('');
  
   body.innerHTML = `<div class="between" style="margin-bottom:14px;flex-wrap:wrap;gap:8px"><h3 style="margin:0">เงินเดือน — ${monthLabel(selMonth() + '-01')}</h3>
       <span class="row" style="gap:8px">${monthPickerHTML('payMonthSel')}<button class="mini" id="printAllSlipsBtn">ส่งออกสลิปทุกคน</button></span></div>
@@ -901,7 +909,7 @@ async function renderPay(body) {
     ${timeHTML}
 
     <h3 style="margin:22px 0 10px">เงินสดค้างที่สาขา</h3>
-    <div class="tablewrap"><table><thead><tr><th>สาขา</th><th>ค้างส่ง</th><th>ค้างกี่วัน</th><th>ส่งแล้ว รอหัวหน้ารับ</th><th>ส่งล่าสุดถึงวันที่</th></tr></thead><tbody>${cashRows}</tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>สาขา</th><th>ยอดวันที่</th><th>ค้างส่ง</th><th>ส่งแล้ว รอหัวหน้ารับ</th><th>ส่งล่าสุดถึงวันที่</th></tr></thead><tbody>${cashRows}</tbody></table></div>
  
     <h3 style="margin:22px 0 10px">เงินสดจากหัวหน้า</h3>
     <div class="card pad" style="margin-bottom:14px">
@@ -909,13 +917,18 @@ async function renderPay(body) {
         <button class="mini" id="ownerConfirmHeadBtn" ${headHeld <= 0 ? 'disabled' : ''}>รับเงินแล้ว</button></div>
       <div class="bigtime">${baht(headHeld)} <span class="sub" style="font-size:13px;font-weight:400">บาท</span></div>
       ${headBreakdownRows ? `<div class="tablewrap" style="margin-top:10px"><table>
-        <thead><tr><th>เก็บจากสาขา</th><th>วันที่เก็บ</th><th>รับจริง</th></tr></thead>
+        <thead><tr><th>เก็บจากสาขา</th><th>ยอดวันที่</th><th>รับจริง</th></tr></thead>
         <tbody>${headBreakdownRows}</tbody>
         <tfoot><tr style="font-weight:700;border-top:2px solid var(--line-2)"><td colspan="2">รวม</td><td class="n">${baht(headHeld)}</td></tr></tfoot>
       </table></div>` : ''}
     </div>
-    <div class="tablewrap"><table><thead><tr><th>วันที่รับ</th><th>จำนวน</th><th>วิธี</th></tr></thead>
-      <tbody>${headLogRows || '<tr><td colspan="3" class="sub">ยังไม่มีประวัติ</td></tr>'}</tbody></table></div>`;
+    <div class="tablewrap"><table><thead><tr><th>วันที่รับจากหัวหน้า</th><th>จำนวน</th><th>วิธี</th></tr></thead>
+      <tbody>${headLogRows || '<tr><td colspan="3" class="sub">ยังไม่มีประวัติ</td></tr>'}</tbody></table></div>
+
+    <h3 style="margin:22px 0 10px">ประวัติส่งเงินจากสาขา — ${monthLabel(mk + '-01')}</h3>
+    <div class="tablewrap"><table><thead><tr><th>วันที่ส่ง</th><th>สาขา</th><th>ยอดวันที่</th><th>ยอดในแอป</th><th>สถานะ</th></tr></thead>
+      <tbody>${remitHistRows || '<tr><td colspan="5" class="sub">เดือนนี้ยังไม่มีการส่งเงิน</td></tr>'}</tbody></table></div>
+    <p class="foot">ยอดต่อวัน = เงินสดตอนปิดร้าน − เงินทอน (ตามยอดล่าสุด ถ้าแก้ยอดย้อนหลัง ตัวเลขรายวันจะเปลี่ยนตาม ส่วน "ยอดในแอป" คือยอดตอนกดส่ง)</p>`;
  
   wireMonthPicker('payMonthSel', () => renderPay(body));
   const ps = $('#printAllSlipsBtn'); if (ps) ps.addEventListener('click', async () => {
