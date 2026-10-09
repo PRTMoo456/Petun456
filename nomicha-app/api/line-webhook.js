@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { sendDailySummary } from './line-daily-summary.js';
+import { sendCashSummary } from './line-cash-summary.js';
 
 // LINE เซ็นลายเซ็นจาก raw request body จึงห้ามให้ parser แปลง body ก่อนตรวจ
 export const config = { api: { bodyParser: false } };
@@ -35,13 +36,22 @@ export default async function handler(req, res) {
   });
   const linkCommands = new Set(['เริ่มสรุป', 'เริ่มรายงาน']);
   const testCommands = new Set(['ทดสอบรายงาน', 'ทดสอบสรุป']);
-  const commands = new Set([...linkCommands, ...testCommands]);
+  const cashCommands = new Set(['สรุปเงิน', 'สรุปเก็บเงิน']);   // ขอสรุปเก็บเงินสดตอนไหนก็ได้ (ปกติส่งเองทุกวันจันทร์ 21:00)
+  const commands = new Set([...linkCommands, ...testCommands, ...cashCommands]);
   const groupEvents = (payload.events || []).filter(event =>
     event.source?.type === 'group' && event.source.groupId && event.type === 'message' &&
     event.message?.type === 'text' && commands.has(event.message.text.trim()),
   );
 
   for (const event of groupEvents) {
+    if (cashCommands.has(event.message.text.trim())) {
+      // ตอบเฉพาะกลุ่มที่ผูกไว้แล้วเท่านั้น — กลุ่มอื่นพิมพ์มาก็ไม่ได้ข้อมูลเงิน
+      const { data: target } = await db.from('line_report_targets').select('group_id').eq('id', 'daily_summary').eq('active', true).maybeSingle();
+      if (target?.group_id !== event.source.groupId) continue;
+      try { await sendCashSummary({ groupId: event.source.groupId }); }
+      catch (error) { return res.status(502).json({ error: error.message }); }
+      continue;
+    }
     const { error } = await db.from('line_report_targets').upsert({
       id: 'daily_summary', group_id: event.source.groupId, active: true, updated_at: new Date().toISOString(),
     });

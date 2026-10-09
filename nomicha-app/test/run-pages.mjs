@@ -300,6 +300,17 @@ if (ownerHTML.pay && ownerHTML.pl) {
     check('สมุดส่งเงิน: แยกวันได้ตรงกับซองบ้านหว้า', JSON.stringify(last.days.map(d => d.amount)) === '[1990,848,1376]' && last.days[0].date === '2026-10-06', JSON.stringify(last.days));
     check('ยอดค้างแยกวัน', calc.pendingDays(recs, '2026-10-06').length === 2, 'นับวันผิด');
   }
+  {
+    const { buildCashSummaryText } = await import('../api/line-cash-summary.js');
+    const br = [{ id:'bwa', name:'บ้านหว้า', cash_tracking_from:'2026-09-01' }, { id:'lnd', name:'เหล่านาดี', cash_tracking_from:'2026-09-01' }];
+    const rec = [['bwa','2026-10-06',2290],['bwa','2026-10-07',1148],['bwa','2026-10-08',1676],['lnd','2026-10-07',785],['lnd','2026-10-08',1160]].map(([b,d,c]) => ({ branch_id:b, record_date:d, cash:c, float_cash:300, sent:true }));
+    const rm = [{ branch_id:'bwa', remit_date:'2026-10-05', through_record_date:'2026-10-05', amount:1, method:'cash', created_at:'2026-10-05T10:00:00Z', received_at:'2026-10-05T10:00:00Z', received_amount:1 },
+      { branch_id:'bwa', remit_date:'2026-10-09', through_record_date:'2026-10-08', amount:4514, method:'cash', created_at:'2026-10-09T06:00:00Z', received_at:'2026-10-09T06:01:00Z', received_amount:4214 },
+      { branch_id:'lnd', remit_date:'2026-10-05', through_record_date:'2026-10-06', amount:1, method:'cash', created_at:'2026-10-05T10:00:00Z', received_at:'2026-10-05T10:00:00Z', received_amount:1 }];
+    const txt = buildCashSummaryText({ today:'2026-10-09', branches:br, remits:rm, headRemits:[], records:rec });
+    check('LINE สรุปเงิน: แยกวันตรงซอง', /06\/10  1,990/.test(txt) && /08\/10  1,376/.test(txt) && /ขาด 300/.test(txt), txt);
+    check('LINE สรุปเงิน: เตือนสาขาที่ยังไม่ได้เก็บ', /ยังไม่ได้เก็บ/.test(txt) && /【เหล่านาดี】 1,345 บาท · 2 วัน/.test(txt), txt);
+  }
   check('ใบส่งของเก่าใช้ราคา snapshot', calc.monthMaterialCost(delivery, itemMap) === 240, 'ราคาใบส่งของเก่าถูกเปลี่ยนตามราคาปัจจุบัน');
   const wh = calc.warehousePL({ deliveries: delivery, externalSales: [], stockItemsById: itemMap,
     avgCostById: { 2: 500 }, reliefPayroll: { total: 0 } });

@@ -11,6 +11,10 @@
     {
       "path": "/api/line-monthly-summary",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/line-cash-summary",
+      "schedule": "0 14 * * 1"
     }
   ]
 }
