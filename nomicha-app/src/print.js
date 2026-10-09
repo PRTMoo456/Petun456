@@ -222,7 +222,7 @@ export function deliveryMonthHTML({ list, branches, stockItems, monthLabelStr, c
   const total = list.reduce((s, x) => s + valOf(x), 0);
   const rows = list.map(dlv => {
     const b = branches.find(x => x.id === dlv.branch_id);
-    const rn = dlv.round_name || dlv.round_id;
+    const rn = dlv.round_name || dlv.round_id || 'ส่งด่วน (นอกรอบ)';
     const qty = Object.values(dlv.items || {}).reduce((s, q) => s + q, 0);
     return `<div class="slip-row"><span>${fmtDate(dlv.delivery_date)} · สาขา${esc(b ? b.name : '—')}
       <span class="sub">${esc(rn)} · ${Object.keys(dlv.items || {}).length} รายการ · ${qty} ชิ้น${dlv.received ? ' · เช็ครับแล้ว' : ''}</span></span>

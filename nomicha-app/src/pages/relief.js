@@ -173,26 +173,35 @@ function nextRound() {
   return cands[0] || null;
 }
 async function renderPack(body) {
+  const urgent = S.round === 'urgent';
   const selector = `<span class="seg2" style="align-self:flex-start">
-    <button data-round="send" aria-pressed="${S.round !== 'wh'}">ส่งของ</button>
+    <button data-round="send" aria-pressed="${S.round !== 'wh' && !urgent}">ส่งของรอบ</button>
+    <button data-round="urgent" aria-pressed="${urgent}">ส่งด่วนวันนี้</button>
     <button data-round="wh" aria-pressed="${S.round === 'wh'}">เช็คสต๊อก</button></span>`;
   if (S.round === 'wh') {
     body.innerHTML = `<div class="stack">${selector}<div id="whBox"><div class="boot">กำลังโหลด…</div></div></div>`;
     wireRoundSelector(body);
     return renderWh($('#whBox'));
   }
-  const nr = nextRound();
-  if (!nr) { body.innerHTML = selector + '<p class="sub">ยังไม่ได้ตั้งรอบส่งของ</p>'; return; }
-  const { r, date: packDate } = nr;
-  if (S.packDate !== packDate) { S.packDate = packDate; S.sendQty = {}; S.packEdit = {}; S.packExtra = []; }
-  const inRound = id => r.branch_ids.includes(id);
-  const shownIds = [...r.branch_ids, ...(S.packExtra || []).filter(id => !inRound(id))];
-  const [{ data: existing }, avail0] = await Promise.all([
+  /* ส่งด่วนวันนี้ (เจ้าของแจ้ง 9 ต.ค. 69): เอาของที่ขาดไปส่งสาขาวันที่ไม่ใช่วันรอบ ต้องบันทึกเป็น "วันนี้" แยกจากรอบ
+     เดิมกด "ส่งเพิ่มสาขานอกรอบ" ในวันที่ไม่ใช่วันรอบ ระบบไปบันทึกเป็นรอบถัดไป → พอถึงวันรอบจริง สาขานั้นขึ้น "ส่งแล้ว" ส่งรอบจริงไม่ได้ */
+  const nr = urgent ? null : nextRound();
+  if (!urgent && !nr) { body.innerHTML = selector + '<p class="sub">ยังไม่ได้ตั้งรอบส่งของ</p>'; return; }
+  const r = urgent ? null : nr.r;
+  const packDate = urgent ? TODAY : nr.date;
+  const roundId = r ? r.id : null;
+  const packKey = packDate + '|' + (roundId || 'urgent');
+  if (S.packKey !== packKey) { S.packKey = packKey; S.packDate = packDate; S.sendQty = {}; S.packEdit = {}; S.packExtra = []; }
+  const inRound = id => !!r && r.branch_ids.includes(id);
+  const [{ data: existingAll }, avail0] = await Promise.all([
     supabase.from('deliveries').select('*').eq('delivery_date', packDate),
     whAvailMap(STOCK_ITEMS),
   ]);
-  const doneById = {}; (existing || []).forEach(d => { doneById[d.branch_id] = d; });
+  const existing = (existingAll || []).filter(d => (d.round_id || null) === roundId);
+  const baseIds = r ? r.branch_ids : existing.map(d => d.branch_id);
+  const shownIds = [...new Set([...baseIds, ...(S.packExtra || [])])];
   const lists = await Promise.all(shownIds.map(async bid => ({ b: BRANCHES.find(x => x.id === bid) || { id: bid, name: bid }, items: await pickListFor(bid) })));
+  const doneById = {}; existing.forEach(d => { doneById[d.branch_id] = d; });
 
   // แบ่งของในคลังให้สาขาที่ยังไม่ยืนยัน ตามลำดับ — ขาดเมื่อไรใส่เท่าที่มี
   const left = { ...avail0 };
@@ -200,6 +209,7 @@ async function renderPack(body) {
     const done = doneById[x.b.id];
     const editing = !!(done && S.packEdit[x.b.id]);
     const rows = x.items.map(i => ({ ...i }));
+    (S.packAdded?.[x.b.id] || []).forEach(id => { if (!rows.some(r2 => String(r2.it.id) === String(id))) { const it = STOCK_ITEMS.find(s2 => String(s2.id) === String(id)); if (it) rows.push({ it, need: 0, have: null, par: null, added: true }); } });
     if (done) Object.keys(done.items || {}).forEach(id => { if (!rows.some(r2 => String(r2.it.id) === id)) { const it = STOCK_ITEMS.find(s2 => String(s2.id) === id); if (it) rows.push({ it, need: 0, have: null, par: null }); } });
     rows.forEach(i => {
       const sentBefore = done ? N(done.items?.[i.it.id]) : 0;
@@ -231,11 +241,12 @@ async function renderPack(body) {
         </div></div>`;
     return `<div class="card pad">
       <button class="accbtn" data-packacc="${x.b.id}" aria-expanded="${open}">
-        <span class="branchname">สาขา${esc(x.b.name)}${inRound(x.b.id) ? '' : ' <span class="sub">(นอกรอบ)</span>'}</span>
+        <span class="branchname">สาขา${esc(x.b.name)}${urgent || inRound(x.b.id) ? '' : ' <span class="sub">(นอกรอบ)</span>'}</span>
         <span style="display:flex;align-items:center;gap:8px">${pill}<span class="chev">›</span></span>
       </button>
       ${open ? `<div class="accbody">
         ${x.rows.length ? x.rows.map(rowHTML).join('') : '<p class="sub" style="margin:0">ไม่ต้องเติมอะไร</p>'}
+        ${locked ? '' : addItemHTML(x)}
         ${locked ? `<button class="btn" style="margin-top:10px" data-packedit="${x.b.id}">แก้จำนวนที่ส่ง</button>`
           : x.rows.length ? `<button class="btn primary" style="margin-top:10px" data-packgo="${x.b.id}">${x.done ? 'บันทึกจำนวนใหม่' : `ยืนยันส่งสาขา${esc(x.b.name)}`}</button>` : ''}
       </div>` : ''}
@@ -246,9 +257,11 @@ async function renderPack(body) {
   body.innerHTML = `<div class="stack">
     ${selector}
     <div class="card pad" style="border-left:3px solid ${pending.length ? 'var(--amber)' : 'var(--brand)'}">
-      <div class="eyebrow">${packDate === TODAY ? 'ส่งของวันนี้' : 'ส่งของครั้งถัดไป'}</div>
+      <div class="eyebrow">${urgent ? 'ส่งด่วนวันนี้ (ไม่นับเป็นรอบ)' : packDate === TODAY ? 'ส่งของวันนี้' : 'เตรียมรอบถัดไป'}</div>
       <div class="bigtime" style="font-size:26px;margin:4px 0">${DAYS[new Date(packDate + 'T00:00:00').getDay()]} ${fmtDate(packDate)}</div>
-      <div class="sub">${shownIds.map(id => { const b2 = BRANCHES.find(z => z.id === id); return `${doneById[id] ? '✓ ' : ''}${esc(b2 ? b2.name : id)}`; }).join(' · ')}</div>
+      <div class="sub">${shownIds.length ? shownIds.map(id => { const b2 = BRANCHES.find(z => z.id === id); return `${doneById[id] ? '✓ ' : ''}${esc(b2 ? b2.name : id)}`; }).join(' · ')
+        : 'เลือกสาขาที่จะเอาของไปส่งด้านล่าง'}</div>
+      ${!urgent && packDate !== TODAY ? '<p class="sub" style="margin:6px 0 0">หน้านี้คือของที่จะส่งในวันรอบ — ถ้าจะเอาของที่ขาดไปส่ง<b>วันนี้</b> ให้กด "ส่งด่วนวันนี้" ด้านบน</p>' : ''}
     </div>
     ${perBranch.map(card).join('')}
     ${pending.length > 1 ? `<button class="btn primary big" id="packAllBtn">ยืนยันส่งทุกสาขาที่ยังไม่ส่ง (${pending.length})</button>` : ''}
@@ -266,21 +279,37 @@ async function renderPack(body) {
   }));
   body.querySelectorAll('[data-packedit]').forEach(btn => btn.addEventListener('click', () => { S.packEdit[btn.dataset.packedit] = true; S.packOpen[btn.dataset.packedit] = true; renderPack(body); }));
   body.querySelectorAll('[data-packextra]').forEach(btn => btn.addEventListener('click', () => { S.packExtra = [...(S.packExtra || []), btn.dataset.packextra]; S.packOpen[btn.dataset.packextra] = true; renderPack(body); }));
+  body.querySelectorAll('[data-additem]').forEach(sel => sel.addEventListener('change', () => {
+    const bid = sel.dataset.additem; if (!sel.value) return;
+    (S.sendQty[bid] = S.sendQty[bid] || {})[sel.value] = S.sendQty[bid][sel.value] ?? '1';
+    (S.packAdded = S.packAdded || {})[bid] = [...new Set([...(S.packAdded[bid] || []), sel.value])];
+    renderPack(body);
+  }));
   body.querySelectorAll('[data-packgo]').forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
-    const ok = await confirmBranch(perBranch.find(y => y.b.id === btn.dataset.packgo), r, packDate);
+    const ok = await confirmBranch(perBranch.find(y => y.b.id === btn.dataset.packgo), roundId, packDate);
     if (!ok) { btn.disabled = false; return; }
     renderPack(body);
   }));
   const all = $('#packAllBtn'); if (all) all.addEventListener('click', async () => {
     all.disabled = true; all.textContent = 'กำลังบันทึก…';
-    for (const x of pending) { if (!(await confirmBranch(x, r, packDate))) break; }
+    for (const x of pending) { if (!(await confirmBranch(x, roundId, packDate))) break; }
     renderPack(body);
   });
 }
 
+// เพิ่มรายการที่ไม่อยู่ในใบจัดของ (เช่น ของที่สาขาขาดกะทันหัน) — เลือกจากรายการวัตถุดิบทั้งหมด
+function addItemHTML(x) {
+  const have = new Set(x.rows.map(i => String(i.it.id)));
+  const opts = STOCK_ITEMS.filter(it => !have.has(String(it.id)));
+  if (!opts.length) return '';
+  return `<label class="whlbl" style="margin-top:10px;display:block">เพิ่มรายการอื่น
+    <select data-additem="${x.b.id}" style="width:100%;margin-top:4px"><option value="">— เลือกวัตถุดิบ —</option>
+    ${opts.map(it => `<option value="${it.id}">${esc(it.name)} (${esc(it.unit)})</option>`).join('')}</select></label>`;
+}
+
 // อ่านช่อง "ส่งจริง" ของสาขาหนึ่ง → ตรวจ → บันทึก (ตัดสต๊อกคลังตามจำนวนส่งจริง)
-async function confirmBranch(x, r, packDate) {
+async function confirmBranch(x, roundId, packDate) {
   const items = {};
   for (const i of x.rows) {
     const raw = S.sendQty[x.b.id]?.[i.it.id];
@@ -289,15 +318,15 @@ async function confirmBranch(x, r, packDate) {
     if (v > i.max) { toast(`${i.it.name}: คลังกลางมีแค่ ${i.max} ${i.it.unit}`); return false; }
     if (v > 0) items[i.it.id] = v;
   }
-  const { error } = await supabase.rpc('confirm_delivery', { p_delivery_date: packDate, p_branch_id: x.b.id, p_round_id: r.id, p_items: items });
+  const { error } = await supabase.rpc('confirm_delivery', { p_delivery_date: packDate, p_branch_id: x.b.id, p_round_id: roundId, p_items: items });
   if (error) { toast('ส่งของไม่สำเร็จ: ' + error.message); return false; }
-  delete S.sendQty[x.b.id]; delete S.packEdit[x.b.id]; S.packOpen[x.b.id] = false;
+  delete S.sendQty[x.b.id]; delete S.packEdit[x.b.id]; if (S.packAdded) delete S.packAdded[x.b.id]; S.packOpen[x.b.id] = false;
   toast(`บันทึกส่งของสาขา${x.b.name}แล้ว — ตัดสต๊อกคลังตามจำนวนส่งจริง`);
   return true;
 }
 
 function wireRoundSelector(body) {
-  body.querySelectorAll('[data-round]').forEach(btn => btn.addEventListener('click', () => { S.round = btn.dataset.round; loadTab(); }));
+  body.querySelectorAll('[data-round]').forEach(btn => btn.addEventListener('click', () => { S.round = btn.dataset.round; S.packAdded = {}; loadTab(); }));
 }
 
 async function renderWh(el) {

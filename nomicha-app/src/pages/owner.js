@@ -736,7 +736,7 @@ async function renderStockDeliveries(el, seg) {
       const price=dlv.price_snapshot?.[id]??it?.branch_price??0;return s+qty*N(price); }, 0);
     const flagCount = dlv.received ? items.filter(([id, qty]) => { const rq = dlv.received[id]; return rq != null && Math.abs(qty - rq) > overuse; }).length : 0;
     const open = S.deliveryOpen && S.deliveryOpen[dlv.id];
-    const roundName = (ROUNDS.find(r => r.id === dlv.round_id) || {}).name || dlv.round_id;
+    const roundName = dlv.round_id ? ((ROUNDS.find(r => r.id === dlv.round_id) || {}).name || dlv.round_id) : 'ส่งด่วน (นอกรอบ)';
     const detailRows = items.map(([id, qty]) => {
       const it = STOCK_ITEMS.find(x => String(x.id) === id); if (!it) return '';
       const rq = dlv.received ? dlv.received[id] : null;
@@ -767,7 +767,7 @@ async function renderStockDeliveries(el, seg) {
   el.querySelectorAll('[data-deliveryacc]').forEach(btn => btn.addEventListener('click', () => { S.deliveryOpen = S.deliveryOpen || {}; S.deliveryOpen[btn.dataset.deliveryacc] = !S.deliveryOpen[btn.dataset.deliveryacc]; renderStockView(seg); }));
   el.querySelectorAll('[data-deliveryprint]').forEach(btn => btn.addEventListener('click', async () => {
     const dlv = (list || []).find(x => x.id === btn.dataset.deliveryprint); if (!dlv) return;
-    const roundName = (ROUNDS.find(r => r.id === dlv.round_id) || {}).name || dlv.round_id;
+    const roundName = dlv.round_id ? ((ROUNDS.find(r => r.id === dlv.round_id) || {}).name || dlv.round_id) : 'ส่งด่วน (นอกรอบ)';
     const companies = await getCompanies();
     const html = deliveryReportHTML({ dlv, branch: b, roundName, staffName: staffEmp?.name, reliefName: relief?.name, reliefRole: 'หัวหน้า', stockItems: STOCK_ITEMS, companies, overuse });
     printDoc(html, 'ไม่พบรอบส่งของนี้');

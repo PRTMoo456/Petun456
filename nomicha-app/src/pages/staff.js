@@ -134,7 +134,10 @@ function homeTab(ctx) {
   }).join('');
 
   const round = isRoundOn(ctx.rounds, TODAY);
-  const dlv = round ? ctx.deliveries.find(x => x.round_id === round.id) : null;
+  // ของรอบวันนี้ก่อน · ถ้ามีของส่งด่วน (นอกรอบ) ที่ยังไม่เช็ครับ ให้ขึ้นอันนั้นด้วย (อันที่ยังไม่เช็คขึ้นก่อน)
+  const todays = ctx.deliveries.filter(x => (round && x.round_id === round.id) || !x.round_id)
+    .sort((x, y) => (!!x.received - !!y.received) || (!!y.round_id - !!x.round_id));
+  const dlv = todays[0] || null;
 
   if (today && today.store_closed) return `
     <div class="card pad" style="border-left:3px solid var(--amber);margin-bottom:14px">
@@ -179,7 +182,7 @@ function homeTab(ctx) {
 
     <div class="card pad" id="remitCard">กำลังโหลดยอดเงินสดค้างส่ง…</div>
 
-    ${round ? receivedCardHTML(round, dlv) : ''}
+    ${round || dlv ? receivedCardHTML(round, dlv) : ''}
 
     ${alreadySent ? `<div class="locked">ส่งยอดของวันนี้แล้ว<br><span class="sub">หากกดผิด ยังแก้ได้ภายในวันนี้</span>
       ${today.store_closed ? '' : '<button class="btn" id="editTodayHomeBtn" style="margin-top:10px">แก้ไขยอดวันนี้</button>'}</div>` : ''}
@@ -214,7 +217,7 @@ function receivedCardHTML(round, dlv) {
   if (dlv.received) {
     return `<div class="card pad">
       <div class="between"><div class="eyebrow">วัตถุดิบนำเข้า</div><span class="pill ok">เช็คแล้ว</span></div>
-      <p class="sub" style="margin-top:6px">เช็ครายการที่ได้รับของรอบนี้เรียบร้อยแล้ว ${items.length} รายการ — ถ้าตัวเลขผิด แจ้งเจ้าของให้แก้ให้</p>
+      <p class="sub" style="margin-top:6px">เช็ครายการที่ได้รับ${dlv.round_id ? 'ของรอบนี้' : 'ของที่ส่งด่วน'}เรียบร้อยแล้ว ${items.length} รายการ — ถ้าตัวเลขผิด แจ้งเจ้าของให้แก้ให้</p>
     </div>`;
   }
   const draft = S.receivedDraft || {};
@@ -228,7 +231,7 @@ function receivedCardHTML(round, dlv) {
   }).join('');
   return `<div class="card pad" id="receivedBox" data-dlv="${dlv.id}">
     <div class="between" style="margin-bottom:4px">
-      <div class="eyebrow">วัตถุดิบนำเข้า</div>
+      <div class="eyebrow">วัตถุดิบนำเข้า${dlv.round_id ? '' : ' (ส่งด่วน)'}</div>
       <button class="mini" id="receivedToggleBtn">${S.receivedOpen ? 'ซ่อน' : 'เช็ครายการ'}</button>
     </div>
     ${S.receivedOpen ? `

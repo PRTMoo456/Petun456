@@ -168,6 +168,40 @@ const getRec = async (n) => (await pg.query(`select * from daily_records where b
   console.log('✓ ประวัติเงินเดือน — เงินเดือน/โควตา/กติกาเดือนใหม่ไม่ย้อนเปลี่ยนเดือนเก่า');
 }
 
+// ---------- 8. migration 020: ส่งด่วนวันนี้ (นอกรอบ) ไม่ไปทับรอบ · แก้แล้วไม่เกิดแถวซ้ำ · ซ่อมแถวหนองหลุบที่ลงผิด ----------
+{
+  const REL = '00000000-0000-0000-0000-00000000000c';
+  await pg.exec(`insert into auth.users(id) values ('${REL}');
+    insert into employees(id, username, name, role) values ('${REL}', 'huana', 'หัวหน้า', 'relief');
+    insert into warehouse_stock(item_id, case_qty, loose_qty, avg_cost) values (2, 10, 0, 100)
+      on conflict (item_id) do update set case_qty = 10, loose_qty = 0;`);
+  const units = async () => { const r = (await pg.query(`select ws.case_qty*it.per_case+ws.loose_qty u from warehouse_stock ws join stock_items it on it.id=ws.item_id where item_id=2`)).rows[0]; return Number(r.u); };
+  const u0 = await units();
+  await asUser(pg, REL, `select confirm_delivery(business_today(), 'nlb', null, '{"2": 3}')`);
+  await asUser(pg, REL, `select confirm_delivery(business_today(), 'nlb', null, '{"2": 5}')`);
+  const urg = (await pg.query(`select * from deliveries where branch_id='nlb' and round_id is null`)).rows;
+  check('ส่งด่วนแก้จำนวนแล้วไม่เกิดแถวซ้ำ', urg.length === 1 && Number(urg[0].items['2']) === 5, JSON.stringify(urg));
+  check('ส่งด่วนตัดสต๊อกคลังตามจำนวนล่าสุด', (await units()) === u0 - 5, `เหลือ ${await units()} จาก ${u0}`);
+  await asUser(pg, REL, `select confirm_delivery(business_today(), 'nlb', 'r2', '{"2": 2}')`);
+  const both = (await pg.query(`select count(*)::int n from deliveries where branch_id='nlb' and delivery_date=business_today()`)).rows[0].n;
+  check('ส่งด่วนกับรอบวันเดียวกันแยกกัน', both === 2, `ได้ ${both} แถว`);
+  let err = null; try { await asUser(pg, REL, `select confirm_delivery(business_today() + 3, 'nlb', null, '{"2": 1}')`); } catch (e) { err = e.message; }
+  check('หัวหน้าบันทึกส่งด่วนล่วงหน้าไม่ได้', !!err, 'ยอมให้บันทึกส่งด่วนวันอื่น');
+
+  // ข้อมูลจริงที่ลงผิด: กดยืนยันวันพุธ 7 ต.ค. แต่ไปลงเป็นรอบศุกร์ 9 ต.ค.
+  await pg.exec(`delete from deliveries where delivery_date = '2026-10-09';`);
+  await pg.exec(`insert into deliveries(delivery_date, branch_id, round_id, items, created_at)
+      values ('2026-10-09', 'nlb', 'r2', '{"2": 4}', '2026-10-07 10:00:00+07'),
+             ('2026-10-09', 'bwa', 'r2', '{"2": 1}', '2026-10-08 18:00:00+07');`);
+  const fix = (await import('node:fs')).readFileSync(new URL('../supabase/migrations/020_urgent_delivery.sql', import.meta.url), 'utf8');
+  await pg.exec(fix); await pg.exec(fix);
+  const moved = (await pg.query(`select delivery_date::text d, round_id from deliveries where branch_id='nlb' and items->>'2'='4'`)).rows[0];
+  check('แถวหนองหลุบที่ลงผิดย้ายกลับไปวันส่งจริง', moved?.d === '2026-10-07' && moved.round_id === null, JSON.stringify(moved));
+  const other = (await pg.query(`select delivery_date::text d, round_id from deliveries where branch_id='bwa' and created_at='2026-10-08 18:00:00+07'`)).rows[0];
+  check('สาขาอื่นที่จัดของล่วงหน้าไม่ถูกแตะ', other?.d === '2026-10-09' && other.round_id === 'r2', JSON.stringify(other));
+  console.log('✓ ส่งด่วนวันนี้ — แยกจากรอบ · แก้แล้วไม่ซ้ำ · ตัดสต๊อกถูก · ซ่อมแถวหนองหลุบ 9 ต.ค.');
+}
+
 console.log('');
 if (fails.length) { console.log('✗ ไม่ผ่าน ' + fails.length + ' ข้อ:'); fails.forEach(f => console.log('   • ' + f)); }
 else console.log('✓✓ ผ่านทุกข้อ');

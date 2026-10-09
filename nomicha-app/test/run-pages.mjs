@@ -884,6 +884,27 @@ if (ownerHTML.pay && ownerHTML.pl) {
     }
     console.log('✓ ส่งของ — วันส่งถัดไปอัตโนมัติ · ช่องส่งจริง · ยืนยันทีละสาขา ตัดสต๊อกตามจริง');
   }
+  // ส่งด่วนวันนี้: บันทึกเป็นวันนี้ ไม่ผูกรอบ (บั๊กหนองหลุบ 9 ต.ค. 69) · เพิ่มรายการที่ไม่อยู่ในใบจัดของได้
+  {
+    document.querySelector('[data-round="urgent"]').click(); await new Promise(r => setTimeout(r, 200));
+    const pick = document.querySelector('[data-packextra="nlb"]');
+    check('ส่งด่วน: เลือกสาขาได้', !!pick, 'ไม่มีปุ่มสาขาหนองหลุบ');
+    if (pick) {
+      pick.click(); await new Promise(r => setTimeout(r, 200));
+      const sel = document.querySelector('[data-additem="nlb"]');
+      check('ส่งด่วน: มีช่องเพิ่มรายการอื่น', !!sel, 'ไม่มีช่องเพิ่มรายการ');
+      if (sel && !document.querySelector('[data-sendq^="nlb|"]')) {
+        sel.value = sel.options[1].value; sel.dispatchEvent(new dom.window.Event('change')); await new Promise(r => setTimeout(r, 200));
+      }
+      const go = document.querySelector('[data-packgo="nlb"]');
+      check('ส่งด่วน: มีปุ่มยืนยัน', !!go, 'ไม่มีปุ่มยืนยัน');
+      if (go) { go.click(); await new Promise(r => setTimeout(r, 200)); }
+      const dv = db.deliveries.find(d => d.branch_id === 'nlb' && d.round_id === null);
+      check('ส่งด่วน: บันทึกเป็นวันนี้ ไม่ผูกรอบ', !!dv && dv.delivery_date === TODAY, JSON.stringify(dv));
+    }
+    document.querySelector('[data-round="send"]').click(); await new Promise(r => setTimeout(r, 200));
+    console.log('✓ ส่งด่วนวันนี้ — บันทึกเป็นวันนี้ แยกจากรอบ · เพิ่มรายการอื่นได้');
+  }
   document.querySelector('[data-round="wh"]').click();
   await new Promise(r => setTimeout(r, 200));
   document.getElementById('purchToggleBtn').click();
